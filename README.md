@@ -1,3 +1,5 @@
+<img src="./phenaki.png" width="450px"></img>
+
 ## Phenaki - Pytorch (wip)
 
 Implementation of <a href="https://phenaki.video/">Phenaki Video</a>, which uses Mask GIT to produce videos of up to 2 minutes in length, in Pytorch
