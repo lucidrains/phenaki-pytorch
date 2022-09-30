@@ -2,7 +2,7 @@
 
 ## <a href="https://en.wikipedia.org/wiki/Phenakistiscope">Phenaki</a> - Pytorch (wip)
 
-Implementation of <a href="https://phenaki.video/">Phenaki Video</a>, which uses Mask GIT to produce text guided videos of up to 2 minutes in length, in Pytorch. It will also combine another <a href="https://arxiv.org/abs/2209.04439">adversarial technique</a> for potentially even better generations
+Implementation of <a href="https://phenaki.video/">Phenaki Video</a>, which uses <a href="https://arxiv.org/abs/2202.04200">Mask GIT</a> to produce text guided videos of up to 2 minutes in length, in Pytorch. It will also combine another <a href="https://arxiv.org/abs/2209.04439">adversarial technique</a> for potentially even better generations
 
 ## Citations
 
@@ -15,6 +15,16 @@ anonymous2023phenaki,
     year    = {2023},
     url     = {https://openreview.net/forum?id=vOEXS39nOF},
     note    = {under review}
+}
+```
+
+```bibtex
+@article{Chang2022MaskGITMG,
+    title   = {MaskGIT: Masked Generative Image Transformer},
+    author  = {Huiwen Chang and Han Zhang and Lu Jiang and Ce Liu and William T. Freeman},
+    journal = {2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+    year    = {2022},
+    pages   = {11305-11315}
 }
 ```
 
