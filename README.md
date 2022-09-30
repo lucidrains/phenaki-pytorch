@@ -1,6 +1,6 @@
 <img src="./phenaki.png" width="450px"></img>
 
-## Phenaki - Pytorch (wip)
+## <a href="https://en.wikipedia.org/wiki/Phenakistiscope">Phenaki</a> - Pytorch (wip)
 
 Implementation of <a href="https://phenaki.video/">Phenaki Video</a>, which uses Mask GIT to produce text guided videos of up to 2 minutes in length, in Pytorch. It will also combine another <a href="https://arxiv.org/abs/2209.04439">adversarial technique</a> for potentially even better generations
 
