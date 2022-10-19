@@ -56,6 +56,17 @@ logits = model(x)
 
 - <a href="https://stability.ai/">Stability.ai</a> for the generous sponsorship to work on cutting edge artificial intelligence research
 
+## Todo
+
+- [ ] pass mask probability into maskgit and auto-mask and get cross entropy loss
+- [ ] cross attention + get t5 embeddings code from imagen-pytorch and get classifier free guidance wired up
+- [ ] inference code that allows for sliding time + conditioning on K past frames
+- [ ] wire up best positional embeddings for all attention
+- [ ] test out maskgit scheduled sampling
+- [ ] wire up full vqgan-vae for c-vivit, just take what is in parti-pytorch already, but make sure to use a stylegan discriminator as said in paper
+- [ ] wire up accelerate for multi-gpu training for both c-vivit and maskgit
+- [ ] some basic video manipulation code, allow for sampled tensor to be saved as gif
+
 ## Citations
 
 ```bibtex
