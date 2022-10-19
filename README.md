@@ -66,6 +66,7 @@ logits = model(x)
 - [ ] wire up full vqgan-vae for c-vivit, just take what is in parti-pytorch already, but make sure to use a stylegan discriminator as said in paper
 - [ ] wire up accelerate for multi-gpu training for both c-vivit and maskgit
 - [ ] some basic video manipulation code, allow for sampled tensor to be saved as gif
+- [ ] make sure maskgit can also support training of images, and make sure it works on local machine
 
 ## Citations
 
