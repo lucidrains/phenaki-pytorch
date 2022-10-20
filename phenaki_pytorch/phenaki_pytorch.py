@@ -1,13 +1,17 @@
 import math
+from functools import partial
+from typing import Optional, List
 
 import torch
 import torch.nn.functional as F
 from torch import nn, einsum
 
-from einops import rearrange
+from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
 
 from vector_quantize_pytorch import VectorQuantize
+
+from phenaki_pytorch.t5 import t5_encode_text, get_encoded_dim, DEFAULT_T5_NAME
 
 # helpers
 
@@ -17,10 +21,15 @@ def exists(val):
 def default(val, d):
     return val if exists(val) else d
 
-# tensor helpers
+# classifier free guidance functions
 
-def uniform(shape, device):
-    return torch.zeros(shape, device = device).float().uniform_(0, 1)
+def prob_mask_like(shape, prob, device):
+    if prob == 1:
+        return torch.ones(shape, device = device, dtype = torch.bool)
+    elif prob == 0:
+        return torch.zeros(shape, device = device, dtype = torch.bool)
+    else:
+        return torch.zeros(shape, device = device).float().uniform_(0, 1) < prob
 
 # feedforward
 
@@ -39,37 +48,60 @@ class Attention(nn.Module):
     def __init__(
         self,
         dim,
+        dim_context = None,
         dim_head = 64,
         heads = 8,
-        causal = False
+        causal = False,
+        num_null_kv = 0
     ):
         super().__init__()
         self.heads = heads
         self.causal = causal
         self.scale = dim_head ** -0.5
         inner_dim = dim_head * heads
+        dim_context = default(dim_context, dim)
 
         self.norm = nn.LayerNorm(dim)
 
+        self.null_kv = nn.Parameter(torch.randn(heads, 2 * num_null_kv, dim_head))
+
         self.to_q = nn.Linear(dim, inner_dim, bias = False)
-        self.to_kv = nn.Linear(dim, inner_dim * 2, bias = False)
+        self.to_kv = nn.Linear(dim_context, inner_dim * 2, bias = False)
         self.to_out = nn.Linear(inner_dim, dim, bias = False)
 
-    def forward(self, x):
-        device, dtype = x.device, x.dtype
+    def forward(
+        self,
+        x,
+        mask = None,
+        context = None
+    ):
+        batch, device, dtype = x.shape[0], x.device, x.dtype
+
+        kv_input = default(context, x)
 
         x = self.norm(x)
 
-        q, k, v = self.to_q(x), *self.to_kv(x).chunk(2, dim = -1)
+        q, k, v = self.to_q(x), *self.to_kv(kv_input).chunk(2, dim = -1)
 
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), (q, k, v))
 
         q = q * self.scale
 
+        nk, nv = repeat(self.null_kv, 'h (n r) d -> b h n r d', b = batch, r = 2).unbind(dim = -2)
+
+        k = torch.cat((nk, k), dim = -2)
+        v = torch.cat((nv, v), dim = -2)
+
         sim = einsum('b h i d, b h j d -> b h i j', q, k)
 
+        i, j = sim.shape[-2:]
+
+        if exists(mask):
+            mask = F.pad(mask, (j - mask.shape[-1], 0), value = True)
+            mask = rearrange(mask, 'b j -> b 1 1 j')
+            sim = sim.masked_fill(~mask, -torch.finfo(sim.dtype).max)
+
         if self.causal:
-            i, j = sim.shape[-2:]
             causal_mask = torch.ones((i, j), device = device, dtype = torch.bool).triu(j - i + 1)
             sim = sim.masked_fill(causal_mask, -torch.finfo(sim.dtype).max)
 
@@ -88,10 +120,13 @@ class Transformer(nn.Module):
         dim,
         *,
         depth,
+        dim_context = None,
         causal = False,
         dim_head = 64,
         heads = 8,
-        ff_mult = 4
+        ff_mult = 4,
+        attn_num_null_kv = 2,
+        has_cross_attn = False
     ):
         super().__init__()
         self.layers = nn.ModuleList([])
@@ -99,15 +134,20 @@ class Transformer(nn.Module):
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
                 Attention(dim = dim, dim_head = dim_head, heads = heads, causal = causal),
+                Attention(dim = dim, dim_head = dim_head, dim_context = dim_context, heads = heads, causal = False, num_null_kv = attn_num_null_kv) if has_cross_attn else None,
                 FeedForward(dim = dim, mult = ff_mult)
             ]))
 
         self.norm_out = nn.LayerNorm(dim)
 
-    def forward(self, x):
+    def forward(self, x, context = None, mask = None):
 
-        for attn, ff in self.layers:
-            x = attn(x) + x
+        for self_attn, cross_attn, ff in self.layers:
+            x = self_attn(x) + x
+
+            if exists(cross_attn) and exists(context):
+                x = cross_attn(x, context = context, mask = None) + x
+
             x = ff(x) + x
 
         return self.norm_out(x)
@@ -171,7 +211,8 @@ class CViViT(nn.Module):
     def forward(
         self,
         video,
-        return_loss = False
+        return_loss = False,
+        return_only_codebook_ids = False
     ):
         assert video.ndim == 5
         b, c, f, *_ = video.shape
@@ -211,6 +252,9 @@ class CViViT(nn.Module):
         tokens = rearrange(tokens, 'b t h w d -> b (t h w) d')
 
         tokens, indices, commit_loss = self.vq(tokens)
+
+        if return_only_codebook_ids:
+            return indices
 
         tokens = rearrange(tokens, 'b (t h w) d -> b t h w d', h = h, w = w)
 
@@ -262,17 +306,22 @@ class MaskGit(nn.Module):
         self.token_emb = nn.Embedding(num_tokens + 1, dim) # last token is used as mask_id
         self.pos_emb = nn.Embedding(max_seq_len, dim)
 
-        self.transformer = Transformer(dim = dim, **kwargs)
+        self.transformer = Transformer(
+            dim = dim,
+            attn_num_null_kv = 2,
+            has_cross_attn = True,
+            **kwargs
+        )
 
         self.to_logits = nn.Linear(dim, num_tokens)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         n, device = x.shape[1], x.device
 
         x = self.token_emb(x)
         x = self.pos_emb(torch.arange(n, device = device)) + x
 
-        x = self.transformer(x)
+        x = self.transformer(x, **kwargs)
 
         return self.to_logits(x)
 
@@ -289,7 +338,7 @@ class MaskGitTrainWrapper(nn.Module):
 
         self.steps = steps
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         batch, seq, device = *x.shape, x.device
 
         rand_step = torch.randint(0, self.steps, (1,), device = device)
@@ -300,7 +349,7 @@ class MaskGitTrainWrapper(nn.Module):
 
         masked_input = torch.where(mask, self.steps, x)
 
-        logits = self.maskgit(masked_input)
+        logits = self.maskgit(masked_input, **kwargs)
 
         loss = F.cross_entropy(logits[mask], x[mask])
         return loss
@@ -308,8 +357,82 @@ class MaskGitTrainWrapper(nn.Module):
 # main class
 
 class Phenaki(nn.Module):
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        maskgit,
+        steps = 100,
+        cvivit = None,
+        t5_name = DEFAULT_T5_NAME,
+        text_embed_dim = None,
+        cond_drop_prob = 0.25,
+        max_text_len = 128
+    ):
         super().__init__()
 
-    def forward(self, x):
-        return x
+        self.cvivit = cvivit
+
+        self.maskgit = maskgit
+        self.maskgit_trainer = MaskGitTrainWrapper(maskgit, steps = steps)
+
+        # text conditioning
+
+        text_embed_dim = default(text_embed_dim, get_encoded_dim(t5_name))
+        self.encode_texts = partial(t5_encode_text, name = t5_name)
+        self.text_embed_dim = text_embed_dim
+        self.max_text_len = max_text_len
+
+        assert cond_drop_prob > 0.
+        self.cond_drop_prob = cond_drop_prob # classifier free guidance for transformers - @crowsonkb
+
+    def sample(
+        self,
+        *,
+        texts: List[str],
+        scene_lengths: List[int]
+    ):
+        raise NotImplementedError
+
+    def forward(
+        self,
+        videos = None,
+        texts: Optional[List[str]] = None,
+        video_codebook_ids = None,
+        text_embeds = None,
+        cond_drop_prob = None
+    ):
+        assert exists(videos) ^ exists(video_codebook_ids), 'either raw video or '
+        assert not (exists(videos) and not exists(self.cvivit)), 'cvivit must be provided if one wants to encode the videos live during training'
+
+        assert exists(text_embeds) ^ exists(texts), 'either raw text of text embeds must be given'
+        assert not (exists(text_embeds) and text_embeds.shape[-1] != self.text_embed_dim), 'text embedding dimension is not correct'
+
+        if not exists(video_codebook_ids):
+            with torch.no_grad():
+                self.cvivit.eval()
+                video_codebook_ids = self.cvivit(videos, return_only_codebook_ids = True)
+
+        if not exists(text_embeds):
+            text_embeds = self.encode_texts(texts, output_device = video_codebook_ids.device)
+
+        batch, device = text_embeds.shape[0], text_embeds.device
+
+        text_mask = torch.any(text_embeds != 0, dim = -1) # save the researcher from having to think about mask, by assuming if all of the feature dimension is 0, it is masked out
+
+        # condition dropout for Katherine's (@crowsonkb) version of classifier free guidance for transformers
+
+        cond_drop_prob = default(cond_drop_prob, self.cond_drop_prob)
+
+        if cond_drop_prob > 0:
+            keep_mask = prob_mask_like((batch,), 1 - cond_drop_prob, device = device)
+            text_mask = rearrange(keep_mask, 'b -> b 1') & text_mask
+
+        # train maskgit with text condition
+
+        loss = self.maskgit_trainer(
+            video_codebook_ids,
+            mask = text_mask,
+            context = text_embeds
+        )
+
+        return loss

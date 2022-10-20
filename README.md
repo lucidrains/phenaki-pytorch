@@ -35,28 +35,52 @@ loss = cvivit(video, return_loss = True)
 loss.backward()
 ```
 
-MaskGit
+Phenaki
 
 ```python
 import torch
-from phenaki_pytorch import MaskGit, MaskGitTrainWrapper
+from phenaki_pytorch import CViViT, MaskGit, Phenaki
 
-model = MaskGit(
+maskgit = MaskGit(
     num_tokens = 5000,
     max_seq_len = 1024,
     dim = 512,
+    dim_context = 768,
     depth = 6,
 )
 
-train_wrapper = MaskGitTrainWrapper(
-    model,
-    steps = 100
+cvivit = CViViT(
+    dim = 512,
+    codebook_size = 5000,
+    patch_size = 32,
+    temporal_patch_size = 2,
+    spatial_depth = 4,
+    temporal_depth = 4,
+    dim_head = 64,
+    heads = 8
 )
 
-codes = torch.randint(0, 5000, (1, 1024))
+phenaki = Phenaki(
+    cvivit = cvivit,
+    maskgit = maskgit
+).cuda()
 
-loss = train_wrapper(codes)
+videos = torch.randn(3, 3, 17, 256, 256).cuda() # (batch, channels, frames, height, width)
+
+texts = [
+    'a whale breaching from afar',
+    'young girl blowing out candles on her birthday cake',
+    'fireworks with blue and green sparkles'
+]
+
+loss = phenaki(videos, texts)
 loss.backward()
+
+# do the above for many steps, then ...
+
+video = phenaki.sample(texts = texts, scene_lengths = (100, 200, 400)) # todo
+
+video.save('./path/to/video.gif') # todo
 ```
 
 ## Appreciation

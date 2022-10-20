@@ -13,11 +13,14 @@ setup(
   keywords = [
     'artificial intelligence',
     'deep learning',
-    'text to video'
+    'transformers',
+    'attention mechanisms',
+    'text-to-video'
   ],
   install_requires=[
     'einops>=0.4',
     'torch>=1.6',
+    'transformers',
     'vector-quantize-pytorch'
   ],
   classifiers=[
