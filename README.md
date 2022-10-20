@@ -89,8 +89,9 @@ video.save('./path/to/video.gif') # todo
 
 ## Todo
 
-- [ ] pass mask probability into maskgit and auto-mask and get cross entropy loss
-- [ ] cross attention + get t5 embeddings code from imagen-pytorch and get classifier free guidance wired up
+- [x] pass mask probability into maskgit and auto-mask and get cross entropy loss
+- [x] cross attention + get t5 embeddings code from imagen-pytorch and get classifier free guidance wired up
+
 - [ ] inference code that allows for sliding time + conditioning on K past frames
 - [ ] wire up best positional embeddings for all attention
 - [ ] test out maskgit scheduled sampling
