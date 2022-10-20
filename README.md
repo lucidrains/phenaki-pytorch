@@ -39,7 +39,7 @@ MaskGit
 
 ```python
 import torch
-from phenaki_pytorch import MaskGit
+from phenaki_pytorch import MaskGit, MaskGitTrainWrapper
 
 model = MaskGit(
     num_tokens = 5000,
@@ -48,8 +48,15 @@ model = MaskGit(
     depth = 6,
 )
 
-x = torch.randint(0, 5000, (1, 1024))
-logits = model(x)
+train_wrapper = MaskGitTrainWrapper(
+    model,
+    steps = 100
+)
+
+codes = torch.randint(0, 5000, (1, 1024))
+
+loss = train_wrapper(codes)
+loss.backward()
 ```
 
 ## Appreciation

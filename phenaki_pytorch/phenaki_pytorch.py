@@ -1,3 +1,5 @@
+import math
+
 import torch
 import torch.nn.functional as F
 from torch import nn, einsum
@@ -14,6 +16,11 @@ def exists(val):
 
 def default(val, d):
     return val if exists(val) else d
+
+# tensor helpers
+
+def uniform(shape, device):
+    return torch.zeros(shape, device = device).float().uniform_(0, 1)
 
 # feedforward
 
@@ -250,7 +257,9 @@ class MaskGit(nn.Module):
         **kwargs
     ):
         super().__init__()
-        self.token_emb = nn.Embedding(num_tokens, dim)
+        self.mask_id = num_tokens
+
+        self.token_emb = nn.Embedding(num_tokens + 1, dim) # last token is used as mask_id
         self.pos_emb = nn.Embedding(max_seq_len, dim)
 
         self.transformer = Transformer(dim = dim, **kwargs)
@@ -266,6 +275,35 @@ class MaskGit(nn.Module):
         x = self.transformer(x)
 
         return self.to_logits(x)
+
+class MaskGitTrainWrapper(nn.Module):
+    def __init__(
+        self,
+        maskgit,
+        *,
+        steps
+    ):
+        super().__init__()
+        self.maskgit = maskgit
+        self.mask_id = maskgit.mask_id
+
+        self.steps = steps
+
+    def forward(self, x):
+        batch, seq, device = *x.shape, x.device
+
+        rand_step = torch.randint(0, self.steps, (1,), device = device)
+        num_tokens_mask = (seq * torch.cos(rand_step * math.pi * 0.5 / self.steps)).round().long().clamp(min = 1) # cosine schedule was best
+
+        _, indices = torch.randn((batch, seq), device = device).topk(num_tokens_mask.item(), dim = -1)
+        mask = torch.zeros((batch, seq), device = device).scatter(1, indices, 1.).bool()
+
+        masked_input = torch.where(mask, self.steps, x)
+
+        logits = self.maskgit(masked_input)
+
+        loss = F.cross_entropy(logits[mask], x[mask])
+        return loss
 
 # main class
 
