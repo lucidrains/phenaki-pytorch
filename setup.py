@@ -21,6 +21,7 @@ setup(
     'einops>=0.4',
     'ema-pytorch',
     'torch>=1.6',
+    'torchvision',
     'transformers',
     'vector-quantize-pytorch'
   ],

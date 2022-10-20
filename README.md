@@ -27,11 +27,11 @@ cvivit = CViViT(
     temporal_depth = 4,
     dim_head = 64,
     heads = 8
-)
+).cuda()
 
-video = torch.randn(1, 3, 17, 256, 256) # (batch, channels, frames + 1 leading frame, image height, image width)
+video = torch.randn(1, 3, 17, 256, 256).cuda() # (batch, channels, frames + 1 leading frame, image height, image width)
 
-loss = cvivit(video, return_loss = True)
+loss = cvivit(video)
 loss.backward()
 ```
 
@@ -91,14 +91,16 @@ video.save('./path/to/video.gif') # todo
 
 - [x] pass mask probability into maskgit and auto-mask and get cross entropy loss
 - [x] cross attention + get t5 embeddings code from imagen-pytorch and get classifier free guidance wired up
+- [x] wire up full vqgan-vae for c-vivit, just take what is in parti-pytorch already, but make sure to use a stylegan discriminator as said in paper
 
 - [ ] inference code that allows for sliding time + conditioning on K past frames
 - [ ] wire up best positional embeddings for all attention
 - [ ] test out maskgit scheduled sampling
-- [ ] wire up full vqgan-vae for c-vivit, just take what is in parti-pytorch already, but make sure to use a stylegan discriminator as said in paper
 - [ ] wire up accelerate for multi-gpu training for both c-vivit and maskgit
 - [ ] some basic video manipulation code, allow for sampled tensor to be saved as gif
 - [ ] make sure maskgit can also support training of images, and make sure it works on local machine
+- [ ] training code for cvivit
+- [ ] make sure to use stylegan-esque discriminator
 
 ## Citations
 

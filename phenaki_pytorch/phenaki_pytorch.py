@@ -1,10 +1,12 @@
 import math
-from functools import partial
+from functools import partial, wraps
 from typing import Optional, List
 
 import torch
 import torch.nn.functional as F
+from torch.autograd import grad as torch_grad
 from torch import nn, einsum
+import torchvision
 
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
@@ -21,6 +23,33 @@ def exists(val):
 def default(val, d):
     return val if exists(val) else d
 
+# decorators
+
+def eval_decorator(fn):
+    def inner(model, *args, **kwargs):
+        was_training = model.training
+        model.eval()
+        out = fn(model, *args, **kwargs)
+        model.train(was_training)
+        return out
+    return inner
+
+def remove_vgg(fn):
+    @wraps(fn)
+    def inner(self, *args, **kwargs):
+        has_vgg = hasattr(self, 'vgg')
+        if has_vgg:
+            vgg = self.vgg
+            delattr(self, 'vgg')
+
+        out = fn(self, *args, **kwargs)
+
+        if has_vgg:
+            self.vgg = vgg
+
+        return out
+    return inner
+
 # classifier free guidance functions
 
 def prob_mask_like(shape, prob, device):
@@ -30,6 +59,51 @@ def prob_mask_like(shape, prob, device):
         return torch.zeros(shape, device = device, dtype = torch.bool)
     else:
         return torch.zeros(shape, device = device).float().uniform_(0, 1) < prob
+
+# gan losses
+
+def hinge_discr_loss(fake, real):
+    return (F.relu(1 + fake) + F.relu(1 - real)).mean()
+
+def hinge_gen_loss(fake):
+    return -fake.mean()
+
+def bce_discr_loss(fake, real):
+    return (-log(1 - torch.sigmoid(fake)) - log(torch.sigmoid(real))).mean()
+
+def bce_gen_loss(fake):
+    return -log(torch.sigmoid(fake)).mean()
+
+def grad_layer_wrt_loss(loss, layer):
+    return torch_grad(
+        outputs = loss,
+        inputs = layer,
+        grad_outputs = torch.ones_like(loss),
+        retain_graph = True
+    )[0].detach()
+
+# tensor helper functions
+
+def log(t, eps = 1e-10):
+    return torch.log(t + eps)
+
+def gradient_penalty(images, output, weight = 10):
+    batch_size = images.shape[0]
+    gradients = torch_grad(outputs = output, inputs = images,
+                           grad_outputs = torch.ones(output.size(), device = images.device),
+                           create_graph = True, retain_graph = True, only_inputs = True)[0]
+
+    gradients = rearrange(gradients, 'b ... -> b (...)')
+    return weight * ((gradients.norm(2, dim = 1) - 1) ** 2).mean()
+
+def l2norm(t):
+    return F.normalize(t, dim = -1)
+
+def leaky_relu(p = 0.1):
+    return nn.LeakyReLU(0.1)
+
+def safe_div(numer, denom, eps = 1e-8):
+    return numer / (denom + eps)
 
 # feedforward
 
@@ -152,6 +226,82 @@ class Transformer(nn.Module):
 
         return self.norm_out(x)
 
+# resnet blocks
+
+class Block(nn.Module):
+    def __init__(
+        self,
+        dim,
+        dim_out,
+        groups = 8
+    ):
+        super().__init__()
+        self.groupnorm = nn.GroupNorm(groups, dim)
+        self.activation = leaky_relu()
+        self.project = nn.Conv2d(dim, dim_out, 3, padding = 1)
+
+    def forward(self, x, scale_shift = None):
+        x = self.groupnorm(x)
+        x = self.activation(x)
+        return self.project(x)
+
+class ResnetBlock(nn.Module):
+    def __init__(
+        self,
+        dim,
+        dim_out = None,
+        *,
+        groups = 8
+    ):
+        super().__init__()
+        dim_out = default(dim_out, dim)
+        self.block = Block(dim, dim_out, groups = groups)
+        self.res_conv = nn.Conv2d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
+
+    def forward(self, x):
+        h = self.block(x)
+        return h + self.res_conv(x)
+
+# discriminator
+
+class Discriminator(nn.Module):
+    def __init__(
+        self,
+        dims,
+        channels = 3,
+        groups = 8,
+        init_kernel_size = 5,
+        cross_embed_kernel_sizes = (3, 7, 15)
+    ):
+        super().__init__()
+        init_dim, *_, final_dim = dims
+        dim_pairs = zip(dims[:-1], dims[1:])
+
+        self.layers = nn.ModuleList([nn.Sequential(
+            nn.Conv2d(channels, init_dim, 5, padding = 2),
+            leaky_relu()
+        )])
+
+        for dim_in, dim_out in dim_pairs:
+            self.layers.append(nn.Sequential(
+                nn.Conv2d(dim_in, dim_out, 4, stride = 2, padding = 1),
+                leaky_relu(),
+                nn.GroupNorm(groups, dim_out),
+                ResnetBlock(dim_out, dim_out),
+            ))
+
+        self.to_logits = nn.Sequential( # return 5 x 5, for PatchGAN-esque training
+            nn.Conv2d(final_dim, final_dim, 1),
+            leaky_relu(),
+            nn.Conv2d(final_dim, 1, 4)
+        )
+
+    def forward(self, x):
+        for net in self.layers:
+            x = net(x)
+
+        return self.to_logits(x)
+
 # c-vivit - 3d ViT with factorized spatial and temporal attention made into an vqgan-vae autoencoder
 
 class CViViT(nn.Module):
@@ -166,7 +316,11 @@ class CViViT(nn.Module):
         temporal_depth,
         dim_head = 64,
         heads = 8,
-        channels = 3
+        channels = 3,
+        use_vgg_and_gan = True,
+        vgg = None,
+        discr_layers = 4,
+        use_hinge_loss = True
     ):
         """
         einstein notations:
@@ -208,10 +362,46 @@ class CViViT(nn.Module):
             Rearrange('b t h w (c pt p1 p2) -> b c (t pt) (h p1) (w p2)', p1 = patch_size, p2 = patch_size, pt = temporal_patch_size),
         )
 
+        # turn off GAN and perceptual loss if grayscale
+
+        self.vgg = None
+        self.discr = None
+        self.use_vgg_and_gan = use_vgg_and_gan
+
+        if not use_vgg_and_gan:
+            return
+
+        # preceptual loss
+
+        if exists(vgg):
+            self.vgg = vgg
+        else:
+            self.vgg = torchvision.models.vgg16(pretrained = True)
+            self.vgg.classifier = nn.Sequential(*self.vgg.classifier[:-2])
+
+        # gan related losses
+
+        layer_mults = list(map(lambda t: 2 ** t, range(discr_layers)))
+        layer_dims = [dim * mult for mult in layer_mults]
+        dims = (dim, *layer_dims)
+
+        self.discr = Discriminator(dims = dims, channels = channels)
+
+        self.discr_loss = hinge_discr_loss if use_hinge_loss else bce_discr_loss
+        self.gen_loss = hinge_gen_loss if use_hinge_loss else bce_gen_loss
+
+    @remove_vgg
+    def state_dict(self, *args, **kwargs):
+        return super().state_dict(*args, **kwargs)
+
+    @remove_vgg
+    def load_state_dict(self, *args, **kwargs):
+        return super().load_state_dict(*args, **kwargs)
+
     def forward(
         self,
         video,
-        return_loss = False,
+        return_recons = False,
         return_only_codebook_ids = False
     ):
         assert video.ndim == 5
@@ -284,10 +474,55 @@ class CViViT(nn.Module):
 
         recon_video = torch.cat((first_frame, rest_frames), dim = 2)
 
-        if not return_loss:
-            return x
+        recon_loss = F.mse_loss(video, recon_video)
 
-        return F.mse_loss(video, recon_video)
+        # early return if training on grayscale
+
+        if not self.use_vgg_and_gan:
+            if return_recons:
+                return recon_loss, recon_video
+
+            return recon_loss
+
+        # perceptual loss
+
+        # use first frame for now - todo, randomly sample or set some maximum frames to help with mem
+
+        input_vgg_input = video[:, :, 0]
+        recon_vgg_input = recon_video[:, :, 0]
+
+        # handle grayscale for vgg
+
+        if video.shape[1] == 1:
+            input_vgg_input, recon_vgg_input = map(lambda t: repeat(t, 'b 1 ... -> b c ...', c = 3), (img_vgg_input, fmap_vgg_input))
+
+        input_vgg_feats = self.vgg(input_vgg_input)
+        recon_vgg_feats = self.vgg(recon_vgg_input)
+
+        perceptual_loss = F.mse_loss(input_vgg_feats, recon_vgg_feats)
+
+        # generator loss
+
+        gen_loss = self.gen_loss(self.discr(recon_vgg_input))
+
+        # calculate adaptive weight
+
+        last_dec_layer = self.to_pixels[0].weight
+
+        norm_grad_wrt_gen_loss = grad_layer_wrt_loss(gen_loss, last_dec_layer).norm(p = 2)
+        norm_grad_wrt_perceptual_loss = grad_layer_wrt_loss(perceptual_loss, last_dec_layer).norm(p = 2)
+
+        adaptive_weight = safe_div(norm_grad_wrt_perceptual_loss, norm_grad_wrt_gen_loss)
+        adaptive_weight.clamp_(max = 1e4)
+
+        # combine losses
+
+        loss = recon_loss + perceptual_loss + commit_loss + adaptive_weight * gen_loss
+
+        if return_recons:
+            return loss, fmap
+
+        return loss
 
 # mask git
 
