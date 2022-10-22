@@ -333,6 +333,7 @@ class CViViT(nn.Module):
         *,
         dim,
         codebook_size,
+        image_size,
         patch_size,
         temporal_patch_size,
         spatial_depth,
@@ -356,6 +357,12 @@ class CViViT(nn.Module):
         """
 
         super().__init__()
+
+        self.image_size = image_size
+        self.patch_size = patch_size
+        self.temporal_patch_size = temporal_patch_size
+
+        assert (self.image_size % self.patch_size) == 0
 
         self.to_patch_emb_first_frame = nn.Sequential(
             Rearrange('b c 1 (h p1) (w p2) -> b 1 h w (c p1 p2)', p1 = patch_size, p2 = patch_size),
@@ -413,6 +420,19 @@ class CViViT(nn.Module):
         self.discr_loss = hinge_discr_loss if use_hinge_loss else bce_discr_loss
         self.gen_loss = hinge_gen_loss if use_hinge_loss else bce_gen_loss
 
+    def num_tokens_per_frames(self, num_frames, include_first_frame = True):
+        image_num_tokens = int(self.image_size / self.patch_size) ** 2
+
+        total_tokens = 0
+
+        if include_first_frame:
+            num_frames -= 1
+            total_tokens += image_num_tokens
+
+        assert (num_frames % self.temporal_patch_size) == 0
+
+        return total_tokens + int(num_frames / self.temporal_patch_size) * image_num_tokens
+
     @remove_vgg
     def state_dict(self, *args, **kwargs):
         return super().state_dict(*args, **kwargs)
@@ -420,6 +440,47 @@ class CViViT(nn.Module):
     @remove_vgg
     def load_state_dict(self, *args, **kwargs):
         return super().load_state_dict(*args, **kwargs)
+
+    def decode_from_codebook_indices(self, indices):
+        codes = self.vq.codebook[indices]
+        return self.decode(codes)
+
+    def decode(
+        self,
+        tokens
+    ):
+        b = tokens.shape[0]
+        h = w = (self.image_size // self.patch_size)
+
+        tokens = rearrange(tokens, 'b (t h w) d -> b t h w d', h = h, w = w)
+
+        # decode - temporal
+
+        tokens = rearrange(tokens, 'b t h w d -> (b h w) t d')
+
+        tokens = self.dec_temporal_transformer(tokens)
+
+        tokens = rearrange(tokens, '(b h w) t d -> b t h w d', b = b, h = h, w = w)
+
+        # decode - spatial
+
+        tokens = rearrange(tokens, 'b t h w d -> (b t) (h w) d')
+
+        tokens = self.dec_spatial_transformer(tokens)
+
+        tokens = rearrange(tokens, '(b t) (h w) d -> b t h w d', b = b, h = h , w = w)
+
+        # to pixels
+
+        first_frame_token, rest_frames_tokens = tokens[:, :1], tokens[:, 1:]
+
+        first_frame = self.to_pixels_first_frame(first_frame_token)
+
+        rest_frames = self.to_pixels(rest_frames_tokens)
+
+        recon_video = torch.cat((first_frame, rest_frames), dim = 2)
+
+        return recon_video
 
     def forward(
         self,
@@ -429,6 +490,7 @@ class CViViT(nn.Module):
     ):
         assert video.ndim == 5
         b, c, f, *_ = video.shape
+        assert video.shape[-1] == self.image_size and video.shape[-2] == self.image_size
 
         first_frame, rest_frames = video[:, :, :1], video[:, :, 1:]
 
@@ -469,33 +531,7 @@ class CViViT(nn.Module):
         if return_only_codebook_ids:
             return indices
 
-        tokens = rearrange(tokens, 'b (t h w) d -> b t h w d', h = h, w = w)
-
-        # decode - temporal
-
-        tokens = rearrange(tokens, 'b t h w d -> (b h w) t d')
-
-        tokens = self.dec_temporal_transformer(tokens)
-
-        tokens = rearrange(tokens, '(b h w) t d -> b t h w d', b = b, h = h, w = w)
-
-        # decode - spatial
-
-        tokens = rearrange(tokens, 'b t h w d -> (b t) (h w) d')
-
-        tokens = self.dec_spatial_transformer(tokens)
-
-        tokens = rearrange(tokens, '(b t) (h w) d -> b t h w d', b = b, h = h , w = w)
-
-        # to pixels
-
-        first_frame_token, rest_frames_tokens = tokens[:, :1], tokens[:, 1:]
-
-        first_frame = self.to_pixels_first_frame(first_frame_token)
-
-        rest_frames = self.to_pixels(rest_frames_tokens)
-
-        recon_video = torch.cat((first_frame, rest_frames), dim = 2)
+        recon_video = self.decode(tokens)
 
         recon_loss = F.mse_loss(video, recon_video)
 
@@ -730,6 +766,7 @@ class Phenaki(nn.Module):
         self.cvivit = cvivit
 
         self.maskgit = maskgit
+        self.mask_id = maskgit.mask_id
         self.maskgit_trainer = MaskGitTrainWrapper(maskgit, steps = steps)
 
         # sampling
@@ -753,10 +790,52 @@ class Phenaki(nn.Module):
     def sample(
         self,
         *,
-        texts: List[str],
-        scene_lengths: List[int]
+        text,
+        num_frames,
+        temperature = 0.9
     ):
-        raise NotImplementedError
+        device = next(self.parameters()).device
+        num_tokens = self.cvivit.num_tokens_per_frames(num_frames)
+
+        with torch.no_grad():
+            text_embeds = self.encode_texts([text], output_device = device)
+
+        shape = (1, num_tokens)
+
+        video_token_ids = torch.full(shape, self.mask_id, device = device)
+        mask = torch.ones(shape, device = device, dtype = torch.bool)
+
+        scores = None # keeping track of the confidence or critic scores, determining what should be masked at the next iteration
+
+        for step in range(self.steps):
+            is_first_step = step == 0
+            is_last_step = step == (self.steps - 1)
+
+            if not is_first_step and exists(scores):
+                time = torch.full((1,), step / self.steps, device = device)
+                num_tokens_mask = (num_tokens * torch.cos(time * math.pi * 0.5)).round().long().clamp(min = 1)
+
+                _, indices = scores.topk(num_tokens_mask.item(), dim = -1)
+                mask = torch.zeros(shape, device = device).scatter(1, indices, 1).bool()
+
+            video_token_ids = torch.where(mask, self.mask_id, video_token_ids)
+
+            logits = self.maskgit(video_token_ids)
+
+            pred_video_ids = gumbel_sample(logits, temperature = temperature)
+
+            video_token_ids = torch.where(mask, pred_video_ids, video_token_ids)
+
+            if not is_last_step:
+                if exists(self.critic):
+                    scores = self.critic(video_token_ids)
+                else:
+                    scores = logits.gather(2, rearrange(pred_video_ids, '... -> ... 1'))
+                    scores = 1 - rearrange(scores, '... 1 -> ...')
+                    scores = torch.where(mask, scores, 1e4)
+
+        video = self.cvivit.decode_from_codebook_indices(video_token_ids)
+        return video
 
     def forward(
         self,

@@ -85,6 +85,7 @@ maskgit = MaskGit(
 cvivit = CViViT(
     dim = 512,
     codebook_size = 5000,
+    image_size = 256,
     patch_size = 32,
     temporal_patch_size = 2,
     spatial_depth = 4,
@@ -111,9 +112,7 @@ loss.backward()
 
 # do the above for many steps, then ...
 
-video = phenaki.sample(texts = texts, scene_lengths = (100, 200, 400)) # todo
-
-video.save('./path/to/video.gif') # todo
+video = phenaki.sample(text = 'a squirrel examines an acorn', num_frames = 17) # (1, 3, 17, 256, 256)
 ```
 
 ## Appreciation
@@ -128,8 +127,8 @@ video.save('./path/to/video.gif') # todo
 - [x] cross attention + get t5 embeddings code from imagen-pytorch and get classifier free guidance wired up
 - [x] wire up full vqgan-vae for c-vivit, just take what is in parti-pytorch already, but make sure to use a stylegan discriminator as said in paper
 - [x] complete token critic training code
+- [x] complete first pass of maskgit scheduled sampling + token critic (optionally without if researcher does not want to do extra training)
 
-- [ ] test out maskgit scheduled sampling + token critic (optionally without if researcher does not want to do extra training)
 - [ ] inference code that allows for sliding time + conditioning on K past frames
 - [ ] wire up best positional embeddings for all attention
 - [ ] wire up accelerate for multi-gpu training for both c-vivit and maskgit
@@ -140,6 +139,7 @@ video.save('./path/to/video.gif') # todo
 - [ ] also build option for token critic to be conditioned with the text
 - [ ] add all top of the line research for stabilizing transformers training
 - [ ] could the critic in turn be used to improve maskgit further with extra adversarial loss?
+- [ ] test maskgit + critic alone on oxford flowers dataset
 
 ## Citations
 
