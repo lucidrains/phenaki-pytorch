@@ -1,6 +1,6 @@
 import math
 from functools import partial, wraps
-from typing import Optional, List
+from typing import Optional, List, Union
 
 import torch
 import torch.nn.functional as F
@@ -107,6 +107,26 @@ def leaky_relu(p = 0.1):
 
 def safe_div(numer, denom, eps = 1e-8):
     return numer / (denom + eps)
+
+# sampling helpers
+
+def log(t, eps = 1e-20):
+    return torch.log(t + eps)
+
+def gumbel_noise(t):
+    noise = torch.zeros_like(t).uniform_(0, 1)
+    return -log(-log(noise))
+
+def gumbel_sample(t, temperature = 1., dim = -1):
+    return ((t / max(temperature, 1e-10)) + gumbel_noise(t)).argmax(dim = dim)
+
+def top_k(logits, thres = 0.5):
+    num_logits = logits.shape[-1]
+    k = max(int((1 - thres) * num_logits), 1)
+    val, ind = torch.topk(logits, k)
+    probs = torch.full_like(logits, float('-inf'))
+    probs.scatter_(1, ind, val)
+    return probs
 
 # feedforward
 
@@ -637,13 +657,15 @@ class CriticTrainer(nn.Module):
         self,
         *,
         maskgit,
-        critic
+        critic,
+        temperature = 0.
     ):
         super().__init__()
         self.maskgit = maskgit
         self.mask_id = maskgit.mask_id
 
         self.critic = critic
+        self.temperature = temperature
 
     def forward(self, x, **kwargs):
         batch, seq, device = *x.shape, x.device
@@ -657,13 +679,22 @@ class CriticTrainer(nn.Module):
 
         mask = torch.zeros((batch, seq), device = device).scatter(1, indices, 1.).bool()
 
+        # mask the input into maskgit
+
         masked_input = torch.where(mask, self.mask_id, x)
+
+        # predict masked tokens
 
         with torch.no_grad():
             self.maskgit.eval()
             logits = self.maskgit(masked_input, **kwargs)
 
-        pred_video_ids = logits.argmax(dim = -1)
+        # sample the predicted masked tokens
+
+        if self.temperature <= 0:
+            pred_video_ids = logits.argmax(dim = -1)
+        else:
+            pred_video_ids = gumbel_sample(logits, temperature = self.temperature)
 
         # derive critic input
 
@@ -684,10 +715,12 @@ class Phenaki(nn.Module):
     def __init__(
         self,
         *,
-        maskgit,
-        steps = 100,
-        cvivit = None,
+        maskgit: MaskGit,
+        cvivit: CViViT = None,
+        critic: TokenCritic = None,
+        steps = 18,                         # 18 is the ideal steps with token critic
         t5_name = DEFAULT_T5_NAME,
+        sample_temperature = 0.,
         text_embed_dim = None,
         cond_drop_prob = 0.25,
         max_text_len = 128
@@ -699,6 +732,12 @@ class Phenaki(nn.Module):
         self.maskgit = maskgit
         self.maskgit_trainer = MaskGitTrainWrapper(maskgit, steps = steps)
 
+        # sampling
+
+        self.critic = critic
+        self.steps = steps
+        self.sample_temperature = sample_temperature
+
         # text conditioning
 
         text_embed_dim = default(text_embed_dim, get_encoded_dim(t5_name))
@@ -709,6 +748,8 @@ class Phenaki(nn.Module):
         assert cond_drop_prob > 0.
         self.cond_drop_prob = cond_drop_prob # classifier free guidance for transformers - @crowsonkb
 
+    @eval_decorator
+    @torch.no_grad()
     def sample(
         self,
         *,
@@ -737,7 +778,8 @@ class Phenaki(nn.Module):
                 video_codebook_ids = self.cvivit(videos, return_only_codebook_ids = True)
 
         if not exists(text_embeds):
-            text_embeds = self.encode_texts(texts, output_device = video_codebook_ids.device)
+            with torch.no_grad():
+                text_embeds = self.encode_texts(texts, output_device = video_codebook_ids.device)
 
         batch, device = text_embeds.shape[0], text_embeds.device
 
