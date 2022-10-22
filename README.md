@@ -112,7 +112,7 @@ loss.backward()
 
 # do the above for many steps, then ...
 
-video = phenaki.sample(text = 'a squirrel examines an acorn', num_frames = 17) # (1, 3, 17, 256, 256)
+video = phenaki.sample(text = 'a squirrel examines an acorn', num_frames = 17, cond_scale = 5.) # (1, 3, 17, 256, 256)
 ```
 
 ## Appreciation

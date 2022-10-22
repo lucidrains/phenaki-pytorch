@@ -609,8 +609,29 @@ class MaskGit(nn.Module):
 
         self.to_logits = nn.Linear(dim, num_tokens)
 
-    def forward(self, x, **kwargs):
-        n, device = x.shape[1], x.device
+    def forward_with_cond_scale(
+        self,
+        *args,
+        cond_scale = 3,
+        **kwargs
+    ):
+        logits = self.forward(*args, cond_drop_prob = 0., **kwargs)
+
+        if cond_scale == 1:
+            return logits
+
+        null_logits = self.forward(*args, cond_drop_prob = 1., **kwargs)
+        return null_logits + (logits - null_logits) * cond_scale
+
+    def forward(self, x, cond_drop_prob = 0., text_mask = None, **kwargs):
+        b, n, device = *x.shape, x.device
+
+        if not exists(text_mask):
+            text_mask = torch.ones((b, n), device = device, dtype = torch.bool)
+
+        if cond_drop_prob > 0:
+            keep_mask = prob_mask_like((b,), 1 - cond_drop_prob, device = device)
+            text_mask = rearrange(keep_mask, 'b -> b 1') & text_mask
 
         x = self.token_emb(x)
         x = self.pos_emb(torch.arange(n, device = device)) + x
@@ -792,6 +813,7 @@ class Phenaki(nn.Module):
         *,
         text,
         num_frames,
+        cond_scale = 3.,
         temperature = 0.9
     ):
         device = next(self.parameters()).device
@@ -820,7 +842,7 @@ class Phenaki(nn.Module):
 
             video_token_ids = torch.where(mask, self.mask_id, video_token_ids)
 
-            logits = self.maskgit(video_token_ids)
+            logits = self.maskgit.forward_with_cond_scale(video_token_ids, cond_scale = cond_scale)
 
             pred_video_ids = gumbel_sample(logits, temperature = temperature)
 
@@ -868,14 +890,11 @@ class Phenaki(nn.Module):
 
         cond_drop_prob = default(cond_drop_prob, self.cond_drop_prob)
 
-        if cond_drop_prob > 0:
-            keep_mask = prob_mask_like((batch,), 1 - cond_drop_prob, device = device)
-            text_mask = rearrange(keep_mask, 'b -> b 1') & text_mask
-
         # train maskgit with text condition
 
         loss = self.maskgit_trainer(
             video_codebook_ids,
+            cond_drop_prob = cond_drop_prob,
             mask = text_mask,
             context = text_embeds
         )
