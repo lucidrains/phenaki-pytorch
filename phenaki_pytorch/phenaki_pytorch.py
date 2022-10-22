@@ -814,7 +814,8 @@ class Phenaki(nn.Module):
         text,
         num_frames,
         cond_scale = 3.,
-        temperature = 0.9
+        starting_temperature = 0.9,
+        noise_K = 1. # hyperparameter for noising of critic score in section 3.2 of token-critic paper, need to find correct value
     ):
         device = next(self.parameters()).device
         num_tokens = self.cvivit.num_tokens_per_frames(num_frames)
@@ -834,6 +835,8 @@ class Phenaki(nn.Module):
             is_first_step = step == 0
             is_last_step = step == (self.steps - 1)
 
+            steps_til_x0 = self.steps - (step + 1)
+
             if not is_first_step and exists(scores):
                 time = torch.full((1,), step / self.steps, device = device)
                 num_tokens_mask = (num_tokens * torch.cos(time * math.pi * 0.5)).round().long().clamp(min = 1)
@@ -850,6 +853,7 @@ class Phenaki(nn.Module):
                 cond_scale = cond_scale
             )
 
+            temperature = starting_temperature * (step / steps_til_x0)
             pred_video_ids = gumbel_sample(logits, temperature = temperature)
 
             video_token_ids = torch.where(mask, pred_video_ids, video_token_ids)
@@ -857,10 +861,13 @@ class Phenaki(nn.Module):
             if not is_last_step:
                 if exists(self.critic):
                     scores = self.critic(video_token_ids)
+
+                    noise = K * (uniform(scores.shape, device) - 0.5) * (steps_til_x0 / self.steps)
+                    scores = scores + noise
                 else:
                     scores = logits.gather(2, rearrange(pred_video_ids, '... -> ... 1'))
                     scores = 1 - rearrange(scores, '... 1 -> ...')
-                    scores = torch.where(mask, scores, 1e4)
+                    scores = torch.where(mask, scores, -1e4)
 
         video = self.cvivit.decode_from_codebook_indices(video_token_ids)
         return video
