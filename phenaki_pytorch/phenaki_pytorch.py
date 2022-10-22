@@ -821,6 +821,7 @@ class Phenaki(nn.Module):
 
         with torch.no_grad():
             text_embeds = self.encode_texts([text], output_device = device)
+            text_mask = torch.any(text_embeds != 0, dim = -1)
 
         shape = (1, num_tokens)
 
@@ -842,7 +843,12 @@ class Phenaki(nn.Module):
 
             video_token_ids = torch.where(mask, self.mask_id, video_token_ids)
 
-            logits = self.maskgit.forward_with_cond_scale(video_token_ids, cond_scale = cond_scale)
+            logits = self.maskgit.forward_with_cond_scale(
+                video_token_ids,
+                context = text_embeds,
+                mask = text_mask,
+                cond_scale = cond_scale
+            )
 
             pred_video_ids = gumbel_sample(logits, temperature = temperature)
 
