@@ -52,6 +52,9 @@ def remove_vgg(fn):
 
 # classifier free guidance functions
 
+def uniform(shape, device):
+    return torch.zeros(shape, device = device).float().uniform_(0, 1)
+
 def prob_mask_like(shape, prob, device):
     if prob == 1:
         return torch.ones(shape, device = device, dtype = torch.bool)
@@ -576,18 +579,104 @@ class MaskGitTrainWrapper(nn.Module):
     def forward(self, x, **kwargs):
         batch, seq, device = *x.shape, x.device
 
+        self.maskgit.train()
+
         rand_step = torch.randint(0, self.steps, (1,), device = device)
         num_tokens_mask = (seq * torch.cos(rand_step * math.pi * 0.5 / self.steps)).round().long().clamp(min = 1) # cosine schedule was best
 
         _, indices = torch.randn((batch, seq), device = device).topk(num_tokens_mask.item(), dim = -1)
         mask = torch.zeros((batch, seq), device = device).scatter(1, indices, 1.).bool()
 
-        masked_input = torch.where(mask, self.steps, x)
+        masked_input = torch.where(mask, self.mask_id, x)
 
         logits = self.maskgit(masked_input, **kwargs)
 
         loss = F.cross_entropy(logits[mask], x[mask])
         return loss
+
+# token critic
+
+class TokenCritic(nn.Module):
+    def __init__(
+        self,
+        *,
+        dim,
+        num_tokens,
+        max_seq_len,
+        **kwargs
+    ):
+        super().__init__()
+        self.mask_id = num_tokens
+
+        self.token_emb = nn.Embedding(num_tokens + 1, dim) # last token is used as mask_id
+        self.pos_emb = nn.Embedding(max_seq_len, dim)
+
+        self.transformer = Transformer(
+            dim = dim,
+            **kwargs
+        )
+
+        self.to_logits = nn.Sequential(
+            nn.Linear(dim, 1),
+            Rearrange('... 1 -> ...')
+        )
+
+
+    def forward(self, x, **kwargs):
+        n, device = x.shape[1], x.device
+
+        x = self.token_emb(x)
+        x = self.pos_emb(torch.arange(n, device = device)) + x
+
+        x = self.transformer(x, **kwargs)
+
+        return self.to_logits(x)
+
+class CriticTrainer(nn.Module):
+    def __init__(
+        self,
+        *,
+        maskgit,
+        critic
+    ):
+        super().__init__()
+        self.maskgit = maskgit
+        self.mask_id = maskgit.mask_id
+
+        self.critic = critic
+
+    def forward(self, x, **kwargs):
+        batch, seq, device = *x.shape, x.device
+
+        self.critic.train()
+
+        rand_time = uniform((1,), device)
+        num_tokens_mask = (seq * torch.cos(rand_time * math.pi * 0.5)).round().long().clamp(min = 1) # cosine schedule was best
+
+        _, indices = torch.randn((batch, seq), device = device).topk(num_tokens_mask.item(), dim = -1)
+
+        mask = torch.zeros((batch, seq), device = device).scatter(1, indices, 1.).bool()
+
+        masked_input = torch.where(mask, self.mask_id, x)
+
+        with torch.no_grad():
+            self.maskgit.eval()
+            logits = self.maskgit(masked_input, **kwargs)
+
+        pred_video_ids = logits.argmax(dim = -1)
+
+        # derive critic input
+
+        critic_input = torch.where(mask, pred_video_ids, x)
+
+        pred_fake_or_real_logits = self.critic(critic_input)
+
+        critic_loss = F.binary_cross_entropy_with_logits(
+            pred_fake_or_real_logits,
+            mask.float()
+        )
+
+        return critic_loss
 
 # main class
 

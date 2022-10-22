@@ -2,7 +2,7 @@
 
 ## <a href="https://en.wikipedia.org/wiki/Phenakistiscope">Phenaki</a> - Pytorch (wip)
 
-Implementation of <a href="https://phenaki.video/">Phenaki Video</a>, which uses <a href="https://arxiv.org/abs/2202.04200">Mask GIT</a> to produce text guided videos of up to 2 minutes in length, in Pytorch. It will also combine another <a href="https://arxiv.org/abs/2209.04439">adversarial technique</a> for potentially even better generations
+Implementation of <a href="https://phenaki.video/">Phenaki Video</a>, which uses <a href="https://arxiv.org/abs/2202.04200">Mask GIT</a> to produce text guided videos of up to 2 minutes in length, in Pytorch. It will also combine another technique involving a <a href="https://arxiv.org/abs/2209.04439">token critic</a> for potentially even better generations
 
 ## Install
 
@@ -32,6 +32,39 @@ cvivit = CViViT(
 video = torch.randn(1, 3, 17, 256, 256).cuda() # (batch, channels, frames + 1 leading frame, image height, image width)
 
 loss = cvivit(video)
+loss.backward()
+```
+
+Training the Token Critic, which vastly improves the generation results
+
+```python
+import torch
+from phenaki_pytorch import CViViT, MaskGit, TokenCritic, CriticTrainer
+
+maskgit = MaskGit(
+    num_tokens = 5000,
+    max_seq_len = 1024,
+    dim = 512,
+    dim_context = 768,
+    depth = 6,
+)
+
+critic = TokenCritic(
+    num_tokens = 5000,
+    max_seq_len = 1024,
+    dim = 512,
+    dim_context = 768,
+    depth = 6
+)
+
+critic_trainer = CriticTrainer(
+    maskgit = maskgit,
+    critic = critic
+)
+
+video_codes = torch.randint(0, 5000, (4, 1024))
+
+loss = critic_trainer(video_codes)
 loss.backward()
 ```
 
@@ -92,15 +125,17 @@ video.save('./path/to/video.gif') # todo
 - [x] pass mask probability into maskgit and auto-mask and get cross entropy loss
 - [x] cross attention + get t5 embeddings code from imagen-pytorch and get classifier free guidance wired up
 - [x] wire up full vqgan-vae for c-vivit, just take what is in parti-pytorch already, but make sure to use a stylegan discriminator as said in paper
+- [x] complete token critic training code
 
+- [ ] test out maskgit scheduled sampling + token critic (optionally without if researcher does not want to do extra training)
 - [ ] inference code that allows for sliding time + conditioning on K past frames
 - [ ] wire up best positional embeddings for all attention
-- [ ] test out maskgit scheduled sampling
 - [ ] wire up accelerate for multi-gpu training for both c-vivit and maskgit
 - [ ] some basic video manipulation code, allow for sampled tensor to be saved as gif
 - [ ] make sure maskgit can also support training of images, and make sure it works on local machine
 - [ ] training code for cvivit
 - [ ] make sure to use stylegan-esque discriminator
+- [ ] also build option for token critic to be conditioned with the text
 
 ## Citations
 
