@@ -138,6 +138,8 @@ video.save('./path/to/video.gif') # todo
 - [ ] training code for cvivit
 - [ ] make sure to use stylegan-esque discriminator
 - [ ] also build option for token critic to be conditioned with the text
+- [ ] add all top of the line research for stabilizing transformers training
+- [ ] could the critic in turn be used to improve maskgit further with extra adversarial loss?
 
 ## Citations
 
