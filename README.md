@@ -120,6 +120,8 @@ video.save('./path/to/video.gif') # todo
 
 - <a href="https://stability.ai/">Stability.ai</a> for the generous sponsorship to work on cutting edge artificial intelligence research
 
+- <a href="https://huggingface.co/">🤗 Huggingface</a> for their amazing transformers and accelerate library
+
 ## Todo
 
 - [x] pass mask probability into maskgit and auto-mask and get cross entropy loss

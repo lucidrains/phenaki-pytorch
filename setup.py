@@ -18,6 +18,7 @@ setup(
     'text-to-video'
   ],
   install_requires=[
+    'accelerate',
     'einops>=0.4',
     'ema-pytorch',
     'torch>=1.6',
