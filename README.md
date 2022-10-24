@@ -140,6 +140,7 @@ video = phenaki.sample(text = 'a squirrel examines an acorn', num_frames = 17, c
 - [ ] add all top of the line research for stabilizing transformers training
 - [ ] could the critic in turn be used to improve maskgit further with extra adversarial loss?
 - [ ] test maskgit + critic alone on oxford flowers dataset
+- [ ] bring in the <a href="https://github.com/lucidrains/mega-pytorch">learned multi-headed EMA</a> across time
 
 ## Citations
 
