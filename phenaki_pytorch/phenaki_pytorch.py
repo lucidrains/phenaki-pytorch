@@ -486,6 +486,8 @@ class CViViT(nn.Module):
         self,
         video,
         return_recons = False,
+        return_discr_loss = False,
+        apply_grad_penalty = True,
         return_only_codebook_ids = False
     ):
         assert video.ndim == 5
@@ -534,6 +536,32 @@ class CViViT(nn.Module):
         recon_video = self.decode(tokens)
 
         recon_loss = F.mse_loss(video, recon_video)
+
+        # whether to return discriminator loss
+
+        if return_discr_loss:
+            assert exists(self.discr), 'discriminator must exist to train it'
+
+            # use first frame for now
+
+            video = video[:, :, 0]
+            recon_video = recon_video[:, :, 0]
+
+            recon_video = recon_video.detach()
+            video.requires_grad_()
+
+            recon_video_discr_logits, video_discr_logits = map(self.discr, (recon_video, video))
+
+            discr_loss = self.discr_loss(recon_video_discr_logits, video_discr_logits)
+
+            if apply_grad_penalty:
+                gp = gradient_penalty(video, video_discr_logits)
+                loss = discr_loss + gp
+
+            if return_recons:
+                return loss, fmap
+
+            return loss
 
         # early return if training on grayscale
 
