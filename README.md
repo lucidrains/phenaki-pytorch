@@ -145,8 +145,9 @@ entire_video = torch.cat((video, video_next), dim = 2) # (1, 3, 17 + 14, 256, 25
 - [x] complete token critic training code
 - [x] complete first pass of maskgit scheduled sampling + token critic (optionally without if researcher does not want to do extra training)
 - [x] inference code that allows for sliding time + conditioning on K past frames
+- [x] alibi pos bias for temporal attention
 
-- [ ] wire up best positional embeddings for all attention
+- [ ] 2d relative positional bias for spatial attention
 - [ ] wire up accelerate for multi-gpu training for both c-vivit and maskgit
 - [ ] some basic video manipulation code, allow for sampled tensor to be saved as gif
 - [ ] make sure maskgit can also support training of images, and make sure it works on local machine
@@ -209,5 +210,14 @@ anonymous2023phenaki,
     author  = {Noam Shazeer},
     year    = {2020},
     url     = {https://arxiv.org/abs/2002.05202}
+}
+```
+
+```bibtex
+@misc{press2021ALiBi,
+    title   = {Train Short, Test Long: Attention with Linear Biases Enable Input Length Extrapolation},
+    author  = {Ofir Press and Noah A. Smith and Mike Lewis},
+    year    = {2021},
+    url     = {https://ofir.io/train_short_test_long.pdf}
 }
 ```
