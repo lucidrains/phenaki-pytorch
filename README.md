@@ -198,14 +198,12 @@ Now your generations should be greatly improved (but who knows, since this is on
 ## Citations
 
 ```bibtex
-@inproceedings{
-anonymous2023phenaki,
-    title   = {Phenaki: Variable Length Video Generation from Open Domain Textual Descriptions},
-    author  = {Anonymous},
-    booktitle = {Submitted to The Eleventh International Conference on Learning Representations },
-    year    = {2023},
-    url     = {https://openreview.net/forum?id=vOEXS39nOF},
-    note    = {under review}
+@article{Villegas2022PhenakiVL,
+    title   = {Phenaki: Variable Length Video Generation From Open Domain Textual Description},
+    author  = {Ruben Villegas and Mohammad Babaeizadeh and Pieter-Jan Kindermans and Hernan Moraldo and Han Zhang and Mohammad Taghi Saffar and Santiago Castro and Julius Kunze and D. Erhan},
+    journal = {ArXiv},
+    year    = {2022},
+    volume  = {abs/2210.02399}
 }
 ```
 
