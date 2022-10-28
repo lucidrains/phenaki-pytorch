@@ -967,6 +967,9 @@ class Phenaki(nn.Module):
 
         # sampling
 
+        if exists(critic):
+            critic = critic.eval()
+
         self.critic = critic
         self.steps = steps
         self.sample_temperature = sample_temperature
@@ -1060,7 +1063,8 @@ class Phenaki(nn.Module):
 
             if not is_last_step:
                 if exists(self.critic):
-                    scores = self.critic(video_token_ids)
+                    with torch.no_grad():
+                        scores = self.critic(video_token_ids)
 
                     noise = K * (uniform(scores.shape, device) - 0.5) * (steps_til_x0 / self.steps)
                     scores = scores + noise
