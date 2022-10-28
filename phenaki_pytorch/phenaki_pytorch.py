@@ -420,6 +420,14 @@ class CViViT(nn.Module):
         self.discr_loss = hinge_discr_loss if use_hinge_loss else bce_discr_loss
         self.gen_loss = hinge_gen_loss if use_hinge_loss else bce_gen_loss
 
+    def frames_per_num_tokens(self, num_tokens):
+        tokens_per_frame = int(self.image_size / self.patch_size) ** 2
+        assert (num_tokens % tokens_per_frame) == 0, f'number of tokens must be divisible by number of tokens per frame {tokens_per_frame}'
+        assert (num_tokens > 0)
+
+        pseudo_frames = num_tokens // tokens_per_frames
+        return (pseudo_frames - 1) * self.temporal_patch_size + 1
+
     def num_tokens_per_frames(self, num_frames, include_first_frame = True):
         image_num_tokens = int(self.image_size / self.patch_size) ** 2
 
@@ -445,6 +453,29 @@ class CViViT(nn.Module):
         codes = self.vq.codebook[indices]
         return self.decode(codes)
 
+    def encode(
+        self,
+        tokens
+    ):
+        b = tokens.shape[0]
+        h = w = (self.image_size // self.patch_size)
+
+        tokens = rearrange(tokens, 'b t h w d -> (b t) (h w) d')
+
+        tokens = self.enc_spatial_transformer(tokens)
+
+        tokens = rearrange(tokens, '(b t) (h w) d -> b t h w d', b = b, h = h , w = w)
+
+        # encode - temporal
+
+        tokens = rearrange(tokens, 'b t h w d -> (b h w) t d')
+
+        tokens = self.enc_temporal_transformer(tokens)
+
+        tokens = rearrange(tokens, '(b h w) t d -> b t h w d', b = b, h = h, w = w)
+
+        return tokens
+
     def decode(
         self,
         tokens
@@ -452,7 +483,8 @@ class CViViT(nn.Module):
         b = tokens.shape[0]
         h = w = (self.image_size // self.patch_size)
 
-        tokens = rearrange(tokens, 'b (t h w) d -> b t h w d', h = h, w = w)
+        if tokens.ndim == 3:
+            tokens = rearrange(tokens, 'b (t h w) d -> b t h w d', h = h, w = w)
 
         # decode - temporal
 
@@ -510,19 +542,7 @@ class CViViT(nn.Module):
 
         # encode - spatial
 
-        tokens = rearrange(tokens, 'b t h w d -> (b t) (h w) d')
-
-        tokens = self.enc_spatial_transformer(tokens)
-
-        tokens = rearrange(tokens, '(b t) (h w) d -> b t h w d', b = b, h = h , w = w)
-
-        # encode - temporal
-
-        tokens = rearrange(tokens, 'b t h w d -> (b h w) t d')
-
-        tokens = self.enc_temporal_transformer(tokens)
-
-        tokens = rearrange(tokens, '(b h w) t d -> b t h w d', b = b, h = h, w = w)
+        tokens = self.encode(tokens)
 
         # quantize
 
@@ -533,6 +553,8 @@ class CViViT(nn.Module):
         if return_only_codebook_ids:
             return indices
 
+        tokens = rearrange(tokens, 'b (t h w) d -> b t h w d', h = h, w = w)
+
         recon_video = self.decode(tokens)
 
         recon_loss = F.mse_loss(video, recon_video)
@@ -541,6 +563,8 @@ class CViViT(nn.Module):
 
         if return_discr_loss:
             assert exists(self.discr), 'discriminator must exist to train it'
+
+            recons = recon_video.clone()
 
             # use first frame for now
 
@@ -559,7 +583,7 @@ class CViViT(nn.Module):
                 loss = discr_loss + gp
 
             if return_recons:
-                return loss, fmap
+                return loss, recons
 
             return loss
 
@@ -607,7 +631,7 @@ class CViViT(nn.Module):
         loss = recon_loss + perceptual_loss + commit_loss + adaptive_weight * gen_loss
 
         if return_recons:
-            return loss, fmap
+            return loss, recon_video
 
         return loss
 
@@ -841,16 +865,36 @@ class Phenaki(nn.Module):
         *,
         text,
         num_frames,
+        prime_frames = None,
         cond_scale = 3.,
         starting_temperature = 0.9,
         noise_K = 1. # hyperparameter for noising of critic score in section 3.2 of token-critic paper, need to find correct value
     ):
         device = next(self.parameters()).device
-        num_tokens = self.cvivit.num_tokens_per_frames(num_frames)
+
+        # derive the priming token ids, to be prepended to the input being demasked by mask-git at each round
+
+        has_prime = exists(prime_frames)
+        prime_token_ids = None
+        prime_token_length = 0
+        prime_num_frames = 0
+
+        if has_prime:
+            with torch.no_grad():
+                prime_token_ids = self.cvivit(prime_frames, return_only_codebook_ids = True)
+
+            prime_token_length = prime_token_ids.shape[-1]
+            prime_num_frames = prime_frames.shape[2]
+
+        num_tokens = self.cvivit.num_tokens_per_frames(num_frames, include_first_frame = not exists(prime_frames))
+
+        # get text embeds and mask
 
         with torch.no_grad():
             text_embeds = self.encode_texts([text], output_device = device)
             text_mask = torch.any(text_embeds != 0, dim = -1)
+
+        # get video token ids
 
         shape = (1, num_tokens)
 
@@ -874,14 +918,19 @@ class Phenaki(nn.Module):
 
             video_token_ids = torch.where(mask, self.mask_id, video_token_ids)
 
+            input_token_ids = video_token_ids if not has_prime else torch.cat((prime_token_ids, video_token_ids), dim = -1)
+
             logits = self.maskgit.forward_with_cond_scale(
-                video_token_ids,
+                input_token_ids,
                 context = text_embeds,
                 mask = text_mask,
                 cond_scale = cond_scale
             )
 
-            temperature = starting_temperature * (step / steps_til_x0)
+            if has_prime:
+                logits = logits[:, prime_token_length:]
+
+            temperature = starting_temperature * (steps_til_x0 / self.steps)
             pred_video_ids = gumbel_sample(logits, temperature = temperature)
 
             video_token_ids = torch.where(mask, pred_video_ids, video_token_ids)
@@ -897,7 +946,14 @@ class Phenaki(nn.Module):
                     scores = 1 - rearrange(scores, '... 1 -> ...')
                     scores = torch.where(mask, scores, -1e4)
 
+        if has_prime:
+            video_token_ids = torch.cat((prime_token_ids, video_token_ids), dim = -1)
+
         video = self.cvivit.decode_from_codebook_indices(video_token_ids)
+
+        if has_prime:
+            video = video[:, :, prime_num_frames:]
+
         return video
 
     def forward(
