@@ -1,3 +1,4 @@
+import copy
 import math
 from functools import partial, wraps
 from typing import Optional, List, Union
@@ -496,6 +497,17 @@ class CViViT(nn.Module):
 
         return total_tokens + int(num_frames / self.temporal_patch_size) * image_num_tokens
 
+    def copy_for_eval(self):
+        device = next(self.parameters()).device
+        vae_copy = copy.deepcopy(self.cpu())
+
+        if vae_copy.use_vgg_and_gan:
+            del vae_copy.discr
+            del vae_copy.vgg
+
+        vae_copy.eval()
+        return vae_copy.to(device)
+
     @remove_vgg
     def state_dict(self, *args, **kwargs):
         return super().state_dict(*args, **kwargs)
@@ -896,7 +908,7 @@ class Phenaki(nn.Module):
     ):
         super().__init__()
 
-        self.cvivit = cvivit
+        self.cvivit = cvivit.copy_for_eval()
 
         self.maskgit = maskgit
         self.mask_id = maskgit.mask_id
