@@ -129,7 +129,23 @@ entire_video = torch.cat((video, video_next), dim = 2) # (1, 3, 17 + 14, 256, 25
 # and so on...
 ```
 
-- [ ] todo, add a master sampler class that allows one to pass in all the text, how long each scene lasts, and stitch together the entire video
+Or just import the `make_video` function
+
+```python
+# ...
+
+entire_video, scenes = make_video(phenaki, texts = [
+    'a squirrel examines an acorn buried in the snow',
+    'a cat watches the squirrel from a frosted window sill',
+    'zoom out to show the entire living room, with the cat residing by the window sill'
+], num_frames = (17, 14, 14), prime_lengths = (5, 5))
+
+entire_video.shape # (1, 3, 17 + 14 + 14 = 45, 256, 256)
+
+# scenes - List[Tensor[3]] - video segment of each scene
+```
+
+That's it!
 
 ## Appreciation
 

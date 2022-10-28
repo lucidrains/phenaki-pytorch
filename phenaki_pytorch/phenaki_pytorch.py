@@ -24,6 +24,9 @@ def exists(val):
 def default(val, d):
     return val if exists(val) else d
 
+def cast_tuple(val, length = 1):
+    return val if isinstance(val, tuple) else (val,) * length
+
 # decorators
 
 def eval_decorator(fn):
@@ -1117,3 +1120,29 @@ class Phenaki(nn.Module):
         )
 
         return loss
+
+# make video function
+
+def make_video(
+    phenaki: Phenaki,
+    texts: List[str],
+    num_frames,
+    prime_lengths
+):
+    num_scenes = len(texts)
+    num_frames = cast_tuple(num_frames, num_scenes)
+
+    prime_lengths = cast_tuple(prime_lengths, num_scenes - 1)
+    prime_lengths = (*prime_lengths, 0) # last scene needs no priming
+
+    entire_video = []
+    video_prime = None
+    scenes = []
+
+    for text, scene_num_frames, next_scene_prime_length in zip(texts, num_frames, prime_lengths):
+        video = phenaki.sample(text = text, prime_frames = video_prime, num_frames = scene_num_frames)
+        scenes.append(video)
+
+        video_prime = video[:, :, -next_scene_prime_length:]
+
+    return torch.cat(scenes, dim = 2), scenes
