@@ -113,7 +113,23 @@ loss.backward()
 # do the above for many steps, then ...
 
 video = phenaki.sample(text = 'a squirrel examines an acorn', num_frames = 17, cond_scale = 5.) # (1, 3, 17, 256, 256)
+
+# so in the paper, they do not really achieve 2 minutes of coherent video, more research needed there
+# they condition on the previous K frames, with new text conditoining
+# you can easily achieve this with this framework as so
+
+video_prime = video[:, :, -3:] # (1, 3, 3, 256, 256) # say K = 3
+
+video_next = phenaki.sample(text = 'a cat watches the squirrel from afar', prime_frames = video_prime, num_frames = 14) # (1, 3, 14, 256, 256)
+
+# the total video
+
+entire_video = torch.cat((video, video_next), dim = 2) # (1, 3, 17 + 14, 256, 256)
+
+# and so on...
 ```
+
+- [ ] todo, add a master sampler class that allows one to pass in all the text, how long each scene lasts, and stitch together the entire video
 
 ## Appreciation
 
