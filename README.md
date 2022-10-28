@@ -146,8 +146,10 @@ entire_video = torch.cat((video, video_next), dim = 2) # (1, 3, 17 + 14, 256, 25
 - [x] complete first pass of maskgit scheduled sampling + token critic (optionally without if researcher does not want to do extra training)
 - [x] inference code that allows for sliding time + conditioning on K past frames
 - [x] alibi pos bias for temporal attention
+- [x] give spatial attention the most powerful positional bias
 
-- [ ] 2d relative positional bias for spatial attention
+- [ ] 3d relative positional bias for maskgit
+- [ ] add depthwise-convs to cvivit for position generating
 - [ ] wire up accelerate for multi-gpu training for both c-vivit and maskgit
 - [ ] some basic video manipulation code, allow for sampled tensor to be saved as gif
 - [ ] make sure maskgit can also support training of images, and make sure it works on local machine
@@ -219,5 +221,15 @@ anonymous2023phenaki,
     author  = {Ofir Press and Noah A. Smith and Mike Lewis},
     year    = {2021},
     url     = {https://ofir.io/train_short_test_long.pdf}
+}
+```
+
+```bibtex
+@article{Liu2022SwinTV,
+    title   = {Swin Transformer V2: Scaling Up Capacity and Resolution},
+    author  = {Ze Liu and Han Hu and Yutong Lin and Zhuliang Yao and Zhenda Xie and Yixuan Wei and Jia Ning and Yue Cao and Zheng Zhang and Li Dong and Furu Wei and Baining Guo},
+    journal = {2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+    year    = {2022},
+    pages   = {11999-12009}
 }
 ```

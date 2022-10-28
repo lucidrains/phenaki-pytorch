@@ -174,6 +174,38 @@ class AlibiPositionalBias(nn.Module):
 
         return self.bias
 
+class ContinuousPositionBias(nn.Module):
+    """ from https://arxiv.org/abs/2111.09883 """
+
+    def __init__(self, *, dim, heads, layers = 2):
+        super().__init__()
+        self.net = nn.ModuleList([])
+        self.net.append(nn.Sequential(nn.Linear(2, dim), leaky_relu()))
+
+        for _ in range(layers - 1):
+            self.net.append(nn.Sequential(nn.Linear(dim, dim), leaky_relu()))
+
+        self.net.append(nn.Linear(dim, heads))
+        self.register_buffer('rel_pos', None, persistent = False)
+
+    def forward(self, n, device):
+        fmap_size = int(math.sqrt(n))
+
+        if not exists(self.rel_pos):
+            pos = torch.arange(fmap_size, device = device)
+            grid = torch.stack(torch.meshgrid(pos, pos, indexing = 'ij'))
+            grid = rearrange(grid, 'c i j -> (i j) c')
+            rel_pos = rearrange(grid, 'i c -> i 1 c') - rearrange(grid, 'j c -> 1 j c')
+            rel_pos = torch.sign(rel_pos) * torch.log(rel_pos.abs() + 1)
+            self.register_buffer('rel_pos', rel_pos, persistent = False)
+
+        rel_pos = self.rel_pos.float()
+
+        for layer in self.net:
+            rel_pos = layer(rel_pos)
+
+        return rearrange(rel_pos, 'i j h -> h i j')
+
 # feedforward
 
 class GEGLU(nn.Module):
@@ -224,7 +256,8 @@ class Attention(nn.Module):
         self,
         x,
         mask = None,
-        context = None
+        context = None,
+        attn_bias = None
     ):
         batch, device, dtype = x.shape[0], x.device, x.dtype
 
@@ -246,6 +279,9 @@ class Attention(nn.Module):
         sim = einsum('b h i d, b h j d -> b h i j', q, k)
 
         i, j = sim.shape[-2:]
+
+        if exists(attn_bias):
+            sim = sim + attn_bias
 
         if exists(mask):
             mask = F.pad(mask, (j - mask.shape[-1], 0), value = True)
@@ -293,10 +329,16 @@ class Transformer(nn.Module):
 
         self.norm_out = nn.LayerNorm(dim)
 
-    def forward(self, x, context = None, mask = None):
+    def forward(
+        self,
+        x,
+        attn_bias = None,
+        context = None,
+        mask = None
+    ):
 
         for self_attn, cross_attn, ff in self.layers:
-            x = self_attn(x) + x
+            x = self_attn(x, attn_bias = attn_bias) + x
 
             if exists(cross_attn) and exists(context):
                 x = cross_attn(x, context = context, mask = None) + x
@@ -418,6 +460,8 @@ class CViViT(nn.Module):
         self.patch_size = patch_size
         self.temporal_patch_size = temporal_patch_size
 
+        self.spatial_rel_pos_bias = ContinuousPositionBias(dim = dim, heads = heads)
+
         assert (self.image_size % self.patch_size) == 0
 
         self.to_patch_emb_first_frame = nn.Sequential(
@@ -529,7 +573,9 @@ class CViViT(nn.Module):
 
         tokens = rearrange(tokens, 'b t h w d -> (b t) (h w) d')
 
-        tokens = self.enc_spatial_transformer(tokens)
+        attn_bias = self.spatial_rel_pos_bias(tokens.shape[-2], device = tokens.device)
+
+        tokens = self.enc_spatial_transformer(tokens, attn_bias = attn_bias)
 
         tokens = rearrange(tokens, '(b t) (h w) d -> b t h w d', b = b, h = h , w = w)
 
@@ -565,7 +611,9 @@ class CViViT(nn.Module):
 
         tokens = rearrange(tokens, 'b t h w d -> (b t) (h w) d')
 
-        tokens = self.dec_spatial_transformer(tokens)
+        attn_bias = self.spatial_rel_pos_bias(tokens.shape[-2], device = tokens.device)
+
+        tokens = self.dec_spatial_transformer(tokens, attn_bias = attn_bias)
 
         tokens = rearrange(tokens, '(b t) (h w) d -> b t h w d', b = b, h = h , w = w)
 
