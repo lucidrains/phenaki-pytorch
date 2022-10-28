@@ -1066,7 +1066,7 @@ class Phenaki(nn.Module):
                     with torch.no_grad():
                         scores = self.critic(video_token_ids)
 
-                    noise = K * (uniform(scores.shape, device) - 0.5) * (steps_til_x0 / self.steps)
+                    noise = noise_K * (uniform(scores.shape, device) - 0.5) * (steps_til_x0 / self.steps)
                     scores = scores + noise
                 else:
                     scores = logits.gather(2, rearrange(pred_video_ids, '... -> ... 1'))
