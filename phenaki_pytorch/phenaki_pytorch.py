@@ -644,6 +644,7 @@ class MaskGit(nn.Module):
         dim,
         num_tokens,
         max_seq_len,
+        gradient_shrink_alpha = 0.1,
         **kwargs
     ):
         super().__init__()
@@ -651,6 +652,8 @@ class MaskGit(nn.Module):
 
         self.token_emb = nn.Embedding(num_tokens + 1, dim) # last token is used as mask_id
         self.pos_emb = nn.Embedding(max_seq_len, dim)
+
+        self.gradient_shrink_alpha = gradient_shrink_alpha  # used with great success in cogview and GLM 130B attention net
 
         self.transformer = Transformer(
             dim = dim,
@@ -687,6 +690,8 @@ class MaskGit(nn.Module):
 
         x = self.token_emb(x)
         x = self.pos_emb(torch.arange(n, device = device)) + x
+
+        x = x * self.gradient_shrink_alpha + x.detach() * (1 - self.gradient_shrink_alpha)
 
         x = self.transformer(x, **kwargs)
 
