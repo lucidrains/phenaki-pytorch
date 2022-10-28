@@ -130,12 +130,17 @@ def top_k(logits, thres = 0.5):
 
 # feedforward
 
+class GEGLU(nn.Module):
+    def forward(self, x):
+        x, gate = x.chunk(2, dim = -1)
+        return F.gelu(gate) * x
+
 def FeedForward(dim, mult = 4):
-    inner_dim = int(mult * dim)
+    inner_dim = int(mult * (2 / 3) * dim)
     return nn.Sequential(
         nn.LayerNorm(dim),
-        nn.Linear(dim, inner_dim, bias = False),
-        nn.GELU(),
+        nn.Linear(dim, inner_dim * 2, bias = False),
+        GEGLU(),
         nn.Linear(inner_dim, dim, bias = False)
     )
 
