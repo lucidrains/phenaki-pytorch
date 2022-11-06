@@ -388,41 +388,80 @@ class ResnetBlock(nn.Module):
 
 # discriminator
 
+class DiscriminatorBlock(nn.Module):
+    def __init__(
+        self,
+        input_channels,
+        filters,
+        downsample = True
+    ):
+        super().__init__()
+        self.conv_res = nn.Conv2d(input_channels, filters, 1, stride = (2 if downsample else 1))
+
+        self.net = nn.Sequential(
+            nn.Conv2d(input_channels, filters, 3, padding=1),
+            leaky_relu(),
+            nn.Conv2d(filters, filters, 3, padding=1),
+            leaky_relu()
+        )
+
+        self.downsample = nn.Sequential(
+            Rearrange('b c (h p1) (w p2) -> b (c p1 p2) h w', p1 = 2, p2 = 2),
+            nn.Conv2d(filters * 4, filters, 1)
+        ) if downsample else None
+
+    def forward(self, x):
+        res = self.conv_res(x)
+        x = self.net(x)
+
+        if exists(self.downsample):
+            x = self.downsample(x)
+
+        x = (x + res) * (1 / math.sqrt(2))
+        return x
+
 class Discriminator(nn.Module):
     def __init__(
         self,
-        dims,
+        *,
+        dim,
+        image_size,
         channels = 3,
-        groups = 8,
-        init_kernel_size = 5,
-        cross_embed_kernel_sizes = (3, 7, 15)
+        attn_layers = [],
+        max_dim = 512
     ):
         super().__init__()
-        init_dim, *_, final_dim = dims
-        dim_pairs = zip(dims[:-1], dims[1:])
+        num_layers = int(math.log2(image_size) - 1)
+        blocks = []
 
-        self.layers = nn.ModuleList([nn.Sequential(
-            nn.Conv2d(channels, init_dim, 5, padding = 2),
-            leaky_relu()
-        )])
+        layer_dims = [channels] + [(dim * 4) * (2 ** i) for i in range(num_layers + 1)]
+        layer_dims = [min(layer_dim, max_dim) for layer_dim in layer_dims]
+        layer_dims_in_out = tuple(zip(layer_dims[:-1], layer_dims[1:]))
 
-        for dim_in, dim_out in dim_pairs:
-            self.layers.append(nn.Sequential(
-                nn.Conv2d(dim_in, dim_out, 4, stride = 2, padding = 1),
-                leaky_relu(),
-                nn.GroupNorm(groups, dim_out),
-                ResnetBlock(dim_out, dim_out),
-            ))
+        blocks = []
 
-        self.to_logits = nn.Sequential( # return 5 x 5, for PatchGAN-esque training
-            nn.Conv2d(final_dim, final_dim, 1),
-            leaky_relu(),
-            nn.Conv2d(final_dim, 1, 4)
+        for ind, (in_chan, out_chan) in enumerate(layer_dims_in_out):
+            num_layer = ind + 1
+            is_not_last = ind != (len(layer_dims_in_out) - 1)
+
+            block = DiscriminatorBlock(in_chan, out_chan, downsample = is_not_last)
+            blocks.append(block)
+
+        self.blocks = nn.ModuleList(blocks)
+
+        dim_last = layer_dims[-1]
+        latent_dim = 2 * 2 * dim_last
+
+        self.to_logits = nn.Sequential(
+            nn.Conv2d(dim_last, dim_last, 3, padding = 1),
+            Rearrange('b ... -> b (...)'),
+            nn.Linear(latent_dim, 1),
+            Rearrange('b 1 -> b')
         )
 
     def forward(self, x):
-        for net in self.layers:
-            x = net(x)
+        for block in self.blocks:
+            x = block(x)
 
         return self.to_logits(x)
 
@@ -439,6 +478,7 @@ class CViViT(nn.Module):
         temporal_patch_size,
         spatial_depth,
         temporal_depth,
+        discr_base_dim = 16,
         dim_head = 64,
         heads = 8,
         channels = 3,
@@ -518,7 +558,7 @@ class CViViT(nn.Module):
         layer_dims = [dim * mult for mult in layer_mults]
         dims = (dim, *layer_dims)
 
-        self.discr = Discriminator(dims = dims, channels = channels)
+        self.discr = Discriminator(dim = discr_base_dim, channels = channels, image_size = image_size)
 
         self.discr_loss = hinge_discr_loss if use_hinge_loss else bce_discr_loss
         self.gen_loss = hinge_gen_loss if use_hinge_loss else bce_gen_loss

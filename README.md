@@ -181,6 +181,7 @@ Now your generations should be greatly improved (but who knows, since this is on
 - [x] inference code that allows for sliding time + conditioning on K past frames
 - [x] alibi pos bias for temporal attention
 - [x] give spatial attention the most powerful positional bias
+- [x] make sure to use stylegan-esque discriminator
 
 - [ ] 3d relative positional bias for maskgit
 - [ ] add depthwise-convs to cvivit for position generating
@@ -188,7 +189,6 @@ Now your generations should be greatly improved (but who knows, since this is on
 - [ ] some basic video manipulation code, allow for sampled tensor to be saved as gif
 - [ ] make sure maskgit can also support training of images, and make sure it works on local machine
 - [ ] training code for cvivit
-- [ ] make sure to use stylegan-esque discriminator
 - [ ] also build option for token critic to be conditioned with the text
 - [ ] add all top of the line research for stabilizing transformers training
 - [ ] could the critic in turn be used to improve maskgit further with extra adversarial loss?
