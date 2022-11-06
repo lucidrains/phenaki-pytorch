@@ -195,6 +195,7 @@ Now your generations should be greatly improved (but who knows, since this is on
 - [ ] test maskgit + critic alone on oxford flowers dataset
 - [ ] bring in the <a href="https://github.com/lucidrains/mega-pytorch">learned multi-headed EMA</a> across time
 - [ ] add a DDPM upsampler, either port from imagen-pytorch or just rewrite a simple version here
+- [ ] outfit customizable self attention blocks to stylegan discriminator
 
 ## Citations
 
