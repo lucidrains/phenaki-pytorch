@@ -707,7 +707,16 @@ class CViViT(nn.Module):
 
         tokens = rearrange(tokens, 'b t h w d -> b (t h w) d')
 
-        tokens, indices, commit_loss = self.vq(tokens)
+        vq_mask = None
+        if exists(mask):
+            # calculate mask for vector quantization based on frames to be masked out
+            assert torch.all(((mask.sum(dim = -1) - 1) % self.temporal_patch_size) == 0), 'number of frames must be divisible by temporal patch size, subtracting off the first frame'
+            first_frame_mask, rest_frame_mask = mask[:, :1], mask[:, 1:]
+            rest_vq_mask = rearrange(rest_frame_mask, 'b (f p) -> b f p', p = self.temporal_patch_size)
+            vq_mask = torch.cat((first_frame_mask, rest_vq_mask.any(dim = -1)), dim = -1)
+            vq_mask = repeat(vq_mask, 'b f -> b (f hw)', hw = h * w)
+
+        tokens, indices, commit_loss = self.vq(tokens, mask = vq_mask)
 
         if return_only_codebook_ids:
             return indices

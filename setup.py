@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
   name = 'phenaki-pytorch',
   packages = find_packages(exclude=[]),
-  version = '0.0.11',
+  version = '0.0.14',
   license='MIT',
   description = 'Phenaki - Pytorch',
   author = 'Phil Wang',
@@ -24,7 +24,7 @@ setup(
     'torch>=1.6',
     'torchvision',
     'transformers',
-    'vector-quantize-pytorch'
+    'vector-quantize-pytorch>=0.10.8'
   ],
   classifiers=[
     'Development Status :: 4 - Beta',
