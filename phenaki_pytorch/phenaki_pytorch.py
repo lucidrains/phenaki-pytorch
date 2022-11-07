@@ -675,6 +675,7 @@ class CViViT(nn.Module):
     def forward(
         self,
         video,
+        mask = None,
         return_recons = False,
         return_discr_loss = False,
         apply_grad_penalty = True,
@@ -715,7 +716,13 @@ class CViViT(nn.Module):
 
         recon_video = self.decode(tokens)
 
-        recon_loss = F.mse_loss(video, recon_video)
+        if exists(mask):
+            # variable lengthed video / images training
+            recon_loss = F.mse_loss(video, recon_video, reduction = 'none')
+            recon_loss = recon_loss[repeat(mask, 'b t -> b c t', c = c)]
+            recon_loss = recon_loss.mean()
+        else:
+            recon_loss = F.mse_loss(video, recon_video)
 
         # whether to return discriminator loss
 
