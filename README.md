@@ -194,11 +194,12 @@ Now your generations should be greatly improved (but who knows, since this is on
 - [ ] training code for cvivit
 - [ ] also build option for token critic to be conditioned with the text
 - [ ] add all top of the line research for stabilizing transformers training
-- [ ] test maskgit + critic alone on oxford flowers dataset
-- [ ] bring in the <a href="https://github.com/lucidrains/mega-pytorch">learned multi-headed EMA</a> across time
+- [ ] bring in concatenative token shift (temporal dimension)
 - [ ] add a DDPM upsampler, either port from imagen-pytorch or just rewrite a simple version here
 - [ ] outfit customizable self attention blocks to stylegan discriminator
 - [ ] take care of masking in maskgit
+- [ ] test maskgit + critic alone on oxford flowers dataset
+- [ ] should be able to train for text to image generation first
 
 ## Citations
 
