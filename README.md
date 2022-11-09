@@ -200,6 +200,7 @@ Now your generations should be greatly improved (but who knows, since this is on
 - [ ] take care of masking in maskgit
 - [ ] test maskgit + critic alone on oxford flowers dataset
 - [ ] should be able to train for text to image generation first
+- [ ] support rectangular sized videos
 
 ## Citations
 
