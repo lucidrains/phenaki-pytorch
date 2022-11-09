@@ -69,6 +69,7 @@ phenaki = Phenaki(
 ).cuda()
 
 videos = torch.randn(3, 3, 17, 256, 256).cuda() # (batch, channels, frames, height, width)
+mask = torch.ones((3, 17)).bool().cuda() # [optional] (batch, frames) - allows for co-training videos of different lengths as well as video and images in the same batch
 
 texts = [
     'a whale breaching from afar',

@@ -27,6 +27,24 @@ def default(val, d):
 def cast_tuple(val, length = 1):
     return val if isinstance(val, tuple) else (val,) * length
 
+# tensor helpers
+
+def get_mask_subset_with_prob(mask, prob):
+    batch, seq_len, device = *mask.shape, mask.device
+    max_masked = math.ceil(prob * seq_len)
+
+    num_tokens = mask.sum(dim=-1, keepdim=True)
+    mask_excess = (mask.cumsum(dim=-1) > (num_tokens * prob).ceil())
+    mask_excess = mask_excess[:, :max_masked]
+
+    rand = torch.rand((batch, seq_len), device=device).masked_fill(~mask, -1e9)
+    _, sampled_indices = rand.topk(max_masked, dim=-1)
+    sampled_indices = (sampled_indices + 1).masked_fill_(mask_excess, 0)
+
+    new_mask = torch.zeros((batch, seq_len + 1), device=device)
+    new_mask.scatter_(-1, sampled_indices, 1)
+    return new_mask[:, 1:].bool()
+
 # decorators
 
 def eval_decorator(fn):
@@ -337,14 +355,15 @@ class Transformer(nn.Module):
         x,
         attn_bias = None,
         context = None,
-        mask = None
+        self_attn_mask = None,
+        cross_attn_context_mask = None
     ):
 
         for self_attn, cross_attn, ff in self.layers:
-            x = self_attn(x, attn_bias = attn_bias) + x
+            x = self_attn(x, attn_bias = attn_bias, mask = self_attn_mask) + x
 
             if exists(cross_attn) and exists(context):
-                x = cross_attn(x, context = context, mask = None) + x
+                x = cross_attn(x, context = context, mask = cross_attn_context_mask) + x
 
             x = ff(x) + x
 
@@ -852,7 +871,14 @@ class MaskGit(nn.Module):
         null_logits = self.forward(*args, cond_drop_prob = 1., **kwargs)
         return null_logits + (logits - null_logits) * cond_scale
 
-    def forward(self, x, cond_drop_prob = 0., text_mask = None, **kwargs):
+    def forward(
+        self,
+        x,
+        cond_drop_prob = 0.,
+        text_mask = None,
+        video_mask = None,
+        **kwargs
+    ):
         b, n, device = *x.shape, x.device
 
         if not exists(text_mask):
@@ -867,7 +893,12 @@ class MaskGit(nn.Module):
 
         x = x * self.gradient_shrink_alpha + x.detach() * (1 - self.gradient_shrink_alpha)
 
-        x = self.transformer(x, **kwargs)
+        x = self.transformer(
+            x,
+            self_attn_mask = video_mask,
+            cross_attn_context_mask = text_mask,
+            **kwargs
+        )
 
         return self.to_logits(x)
 
@@ -884,22 +915,24 @@ class MaskGitTrainWrapper(nn.Module):
 
         self.steps = steps
 
-    def forward(self, x, **kwargs):
+    def forward(self, x, video_mask = None, **kwargs):
         batch, seq, device = *x.shape, x.device
 
         self.maskgit.train()
 
         rand_step = torch.randint(0, self.steps, (1,), device = device)
-        num_tokens_mask = (seq * torch.cos(rand_step * math.pi * 0.5 / self.steps)).round().long().clamp(min = 1) # cosine schedule was best
+        mask_token_prob = torch.cos(rand_step * math.pi * 0.5 / self.steps) # cosine schedule was best
 
-        _, indices = torch.randn((batch, seq), device = device).topk(num_tokens_mask.item(), dim = -1)
-        mask = torch.zeros((batch, seq), device = device).scatter(1, indices, 1.).bool()
+        if not exists(video_mask):
+            video_mask = torch.ones((batch, seq), device = device).boool()
 
-        masked_input = torch.where(mask, self.mask_id, x)
+        mask_token_mask = get_mask_subset_with_prob(video_mask, mask_token_prob)
 
-        logits = self.maskgit(masked_input, **kwargs)
+        masked_input = torch.where(mask_token_mask, self.mask_id, x)
 
-        loss = F.cross_entropy(logits[mask], x[mask])
+        logits = self.maskgit(masked_input, video_mask = video_mask, **kwargs)
+
+        loss = F.cross_entropy(logits[mask_token_mask], x[mask_token_mask])
         return loss
 
 # token critic
@@ -1105,7 +1138,7 @@ class Phenaki(nn.Module):
             logits = self.maskgit.forward_with_cond_scale(
                 input_token_ids,
                 context = text_embeds,
-                mask = text_mask,
+                text_mask = text_mask,
                 cond_scale = cond_scale
             )
 
@@ -1144,6 +1177,7 @@ class Phenaki(nn.Module):
         videos = None,
         texts: Optional[List[str]] = None,
         video_codebook_ids = None,
+        video_frame_mask = None,
         text_embeds = None,
         cond_drop_prob = None
     ):
@@ -1170,12 +1204,24 @@ class Phenaki(nn.Module):
 
         cond_drop_prob = default(cond_drop_prob, self.cond_drop_prob)
 
+        # calculate video frame mask
+
+        video_mask = None
+        if exists(video_frame_mask):
+            assert torch.all(((video_frame_mask.sum(dim = -1) - 1) % self.cvivit.temporal_patch_size) == 0), 'number of frames must be divisible by temporal patch size, subtracting off the first frame'
+            first_frame_mask, rest_frame_mask = video_frame_mask[:, :1], video_frame_mask[:, 1:]
+            rest_vq_mask = rearrange(rest_frame_mask, 'b (f p) -> b f p', p = self.cvivit.temporal_patch_size)
+            video_mask = torch.cat((first_frame_mask, rest_vq_mask.any(dim = -1)), dim = -1)
+            patch_size = self.cvivit.patch_size
+            video_mask = repeat(video_mask, 'b f -> b (f hw)', hw = (videos.shape[-1] // patch_size) * (videos.shape[-2] // patch_size))
+
         # train maskgit with text condition
 
         loss = self.maskgit_trainer(
             video_codebook_ids,
             cond_drop_prob = cond_drop_prob,
-            mask = text_mask,
+            video_mask = video_mask,
+            text_mask = text_mask,
             context = text_embeds
         )
 
