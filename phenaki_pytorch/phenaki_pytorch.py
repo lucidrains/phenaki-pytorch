@@ -710,7 +710,11 @@ class CViViT(nn.Module):
         apply_grad_penalty = True,
         return_only_codebook_ids = False
     ):
-        assert video.ndim == 5
+        assert video.ndim in {4, 5}
+
+        if video.ndim == 4:
+            video = rearrange(video, 'b c h w -> b c 1 h w')
+
         b, c, f, *_ = video.shape
         assert video.shape[-1] == self.image_size and video.shape[-2] == self.image_size
 
@@ -929,7 +933,7 @@ class MaskGitTrainWrapper(nn.Module):
         mask_token_prob = torch.cos(rand_step * math.pi * 0.5 / self.steps) # cosine schedule was best
 
         if not exists(video_mask):
-            video_mask = torch.ones((batch, seq), device = device).boool()
+            video_mask = torch.ones((batch, seq), device = device).bool()
 
         mask_token_mask = get_mask_subset_with_prob(video_mask, mask_token_prob)
 
@@ -1193,6 +1197,11 @@ class Phenaki(nn.Module):
         assert not (exists(text_embeds) and text_embeds.shape[-1] != self.text_embed_dim), 'text embedding dimension is not correct'
 
         if not exists(video_codebook_ids):
+            assert videos.ndim in {4, 5}
+
+            if videos.ndim == 4:
+                videos = rearrange(videos, 'b c h w -> b c 1 h w')
+
             with torch.no_grad():
                 self.cvivit.eval()
                 video_codebook_ids = self.cvivit(videos, return_only_codebook_ids = True)
