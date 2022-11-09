@@ -582,6 +582,16 @@ class CViViT(nn.Module):
         self.discr_loss = hinge_discr_loss if use_hinge_loss else bce_discr_loss
         self.gen_loss = hinge_gen_loss if use_hinge_loss else bce_gen_loss
 
+    def calculate_video_token_mask(self, videos, video_frame_mask):
+        *_, h, w = videos.shape
+        patch_size = self.patch_size
+
+        assert torch.all(((video_frame_mask.sum(dim = -1) - 1) % self.temporal_patch_size) == 0), 'number of frames must be divisible by temporal patch size, subtracting off the first frame'
+        first_frame_mask, rest_frame_mask = video_frame_mask[:, :1], video_frame_mask[:, 1:]
+        rest_vq_mask = rearrange(rest_frame_mask, 'b (f p) -> b f p', p = self.temporal_patch_size)
+        video_mask = torch.cat((first_frame_mask, rest_vq_mask.any(dim = -1)), dim = -1)
+        return repeat(video_mask, 'b f -> b (f hw)', hw = (h // patch_size) * (w // patch_size))
+
     def frames_per_num_tokens(self, num_tokens):
         tokens_per_frame = int(self.image_size / self.patch_size) ** 2
         assert (num_tokens % tokens_per_frame) == 0, f'number of tokens must be divisible by number of tokens per frame {tokens_per_frame}'
@@ -728,12 +738,7 @@ class CViViT(nn.Module):
 
         vq_mask = None
         if exists(mask):
-            # calculate mask for vector quantization based on frames to be masked out
-            assert torch.all(((mask.sum(dim = -1) - 1) % self.temporal_patch_size) == 0), 'number of frames must be divisible by temporal patch size, subtracting off the first frame'
-            first_frame_mask, rest_frame_mask = mask[:, :1], mask[:, 1:]
-            rest_vq_mask = rearrange(rest_frame_mask, 'b (f p) -> b f p', p = self.temporal_patch_size)
-            vq_mask = torch.cat((first_frame_mask, rest_vq_mask.any(dim = -1)), dim = -1)
-            vq_mask = repeat(vq_mask, 'b f -> b (f hw)', hw = h * w)
+            vq_mask = self.calculate_video_token_mask(video, mask)
 
         tokens, indices, commit_loss = self.vq(tokens, mask = vq_mask)
 
@@ -1208,12 +1213,10 @@ class Phenaki(nn.Module):
 
         video_mask = None
         if exists(video_frame_mask):
-            assert torch.all(((video_frame_mask.sum(dim = -1) - 1) % self.cvivit.temporal_patch_size) == 0), 'number of frames must be divisible by temporal patch size, subtracting off the first frame'
-            first_frame_mask, rest_frame_mask = video_frame_mask[:, :1], video_frame_mask[:, 1:]
-            rest_vq_mask = rearrange(rest_frame_mask, 'b (f p) -> b f p', p = self.cvivit.temporal_patch_size)
-            video_mask = torch.cat((first_frame_mask, rest_vq_mask.any(dim = -1)), dim = -1)
-            patch_size = self.cvivit.patch_size
-            video_mask = repeat(video_mask, 'b f -> b (f hw)', hw = (videos.shape[-1] // patch_size) * (videos.shape[-2] // patch_size))
+            video_mask = self.cvivit.calculate_video_token_mask(
+                videos,
+                video_frame_mask = video_frame_mask
+            )
 
         # train maskgit with text condition
 
