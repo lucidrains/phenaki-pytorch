@@ -274,7 +274,8 @@ class Attention(nn.Module):
         dim_head = 64,
         heads = 8,
         causal = False,
-        num_null_kv = 0
+        num_null_kv = 0,
+        norm_context = True
     ):
         super().__init__()
         self.heads = heads
@@ -287,6 +288,7 @@ class Attention(nn.Module):
             self.rel_pos_bias = AlibiPositionalBias(heads = heads)
 
         self.norm = nn.LayerNorm(dim)
+        self.context_norm = nn.LayerNorm(dim_context) if norm_context else nn.Identity()
 
         self.null_kv = nn.Parameter(torch.randn(heads, 2 * num_null_kv, dim_head))
 
@@ -302,6 +304,9 @@ class Attention(nn.Module):
         attn_bias = None
     ):
         batch, device, dtype = x.shape[0], x.device, x.dtype
+
+        if exists(context):
+            context = self.context_norm(context)
 
         kv_input = default(context, x)
 

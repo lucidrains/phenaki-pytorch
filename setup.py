@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
   name = 'phenaki-pytorch',
   packages = find_packages(exclude=[]),
-  version = '0.0.19',
+  version = '0.0.20',
   license='MIT',
   description = 'Phenaki - Pytorch',
   author = 'Phil Wang',
