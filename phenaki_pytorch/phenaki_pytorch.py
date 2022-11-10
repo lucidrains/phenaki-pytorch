@@ -290,6 +290,7 @@ class Attention(nn.Module):
         self.norm = nn.LayerNorm(dim)
         self.context_norm = nn.LayerNorm(dim_context) if norm_context else nn.Identity()
 
+        self.num_null_kv = num_null_kv
         self.null_kv = nn.Parameter(torch.randn(heads, 2 * num_null_kv, dim_head))
 
         self.to_q = nn.Linear(dim, inner_dim, bias = False)
@@ -328,10 +329,11 @@ class Attention(nn.Module):
         i, j = sim.shape[-2:]
 
         if exists(attn_bias):
+            attn_bias = F.pad(attn_bias, (self.num_null_kv, 0), value = 0.)
             sim = sim + attn_bias
 
         if exists(mask):
-            mask = F.pad(mask, (j - mask.shape[-1], 0), value = True)
+            mask = F.pad(mask, (self.num_null_kv, 0), value = True)
             mask = rearrange(mask, 'b j -> b 1 1 j')
             sim = sim.masked_fill(~mask, -torch.finfo(sim.dtype).max)
 
