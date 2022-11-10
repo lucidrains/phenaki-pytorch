@@ -9,7 +9,7 @@ from torch.autograd import grad as torch_grad
 from torch import nn, einsum
 import torchvision
 
-from einops import rearrange, repeat
+from einops import rearrange, repeat, unpack, pack
 from einops.layers.torch import Rearrange
 
 from vector_quantize_pytorch import VectorQuantize
@@ -203,26 +203,42 @@ class AlibiPositionalBias(nn.Module):
 class ContinuousPositionBias(nn.Module):
     """ from https://arxiv.org/abs/2111.09883 """
 
-    def __init__(self, *, dim, heads, layers = 2):
+    def __init__(
+        self,
+        *,
+        dim,
+        heads,
+        num_dims = 2, # 2 for images, 3 for video
+        layers = 2,
+        log_dist = True,
+        cache_rel_pos = False
+    ):
         super().__init__()
+        self.num_dims = num_dims
+        self.log_dist = log_dist
+
         self.net = nn.ModuleList([])
-        self.net.append(nn.Sequential(nn.Linear(2, dim), leaky_relu()))
+        self.net.append(nn.Sequential(nn.Linear(self.num_dims, dim), leaky_relu()))
 
         for _ in range(layers - 1):
             self.net.append(nn.Sequential(nn.Linear(dim, dim), leaky_relu()))
 
         self.net.append(nn.Linear(dim, heads))
+
+        self.cache_rel_pos = cache_rel_pos
         self.register_buffer('rel_pos', None, persistent = False)
 
-    def forward(self, h, w, device):
+    def forward(self, *dimensions, device = torch.device('cpu')):
 
-        if not exists(self.rel_pos):
-            pos_h = torch.arange(h, device = device)
-            pos_w = torch.arange(w, device = device)
-            grid = torch.stack(torch.meshgrid(pos_h, pos_w, indexing = 'ij'))
-            grid = rearrange(grid, 'c i j -> (i j) c')
+        if not exists(self.rel_pos) or not self.cache_rel_pos:
+            positions = [torch.arange(d, device = device) for d in dimensions]
+            grid = torch.stack(torch.meshgrid(*positions, indexing = 'ij'))
+            grid = rearrange(grid, 'c ... -> (...) c')
             rel_pos = rearrange(grid, 'i c -> i 1 c') - rearrange(grid, 'j c -> 1 j c')
-            rel_pos = torch.sign(rel_pos) * torch.log(rel_pos.abs() + 1)
+
+            if self.log_dist:
+                rel_pos = torch.sign(rel_pos) * torch.log(rel_pos.abs() + 1)
+
             self.register_buffer('rel_pos', rel_pos, persistent = False)
 
         rel_pos = self.rel_pos.float()
@@ -599,6 +615,17 @@ class CViViT(nn.Module):
         video_mask = torch.cat((first_frame_mask, rest_vq_mask.any(dim = -1)), dim = -1)
         return repeat(video_mask, 'b f -> b (f hw)', hw = (h // patch_size) * (w // patch_size))
 
+    def get_video_patch_shape(self, num_frames, include_first_frame = True):
+        patch_frames = 0
+
+        if include_first_frame:
+            num_frames -= 1
+            patch_frames += 1
+
+        patch_frames += (num_frames // self.temporal_patch_size)
+
+        return (patch_frames, *self.patch_height_width)
+
     @property
     def image_num_tokens(self):
         return int(self.image_size[0] / self.patch_size[0]) * int(self.image_size[1] / self.patch_size[1])
@@ -648,13 +675,16 @@ class CViViT(nn.Module):
         codes = self.vq.codebook[indices]
         return self.decode(codes)
 
+    @property
+    def patch_height_width(self):
+        return self.image_size[0] // self.patch_size[0], self.image_size[1] // self.patch_size[1]
+
     def encode(
         self,
         tokens
     ):
         b = tokens.shape[0]
-        h = self.image_size[0] // self.patch_size[0]
-        w = self.image_size[1] // self.patch_size[1]
+        h, w = self.patch_height_width
 
         tokens = rearrange(tokens, 'b t h w d -> (b t) (h w) d')
 
@@ -679,8 +709,7 @@ class CViViT(nn.Module):
         tokens
     ):
         b = tokens.shape[0]
-        h = self.image_size[0] // self.patch_size[0]
-        w = self.image_size[1] // self.patch_size[1]
+        h, w = self.patch_height_width
 
         if tokens.ndim == 3:
             tokens = rearrange(tokens, 'b (t h w) d -> b t h w d', h = h, w = w)
@@ -752,7 +781,7 @@ class CViViT(nn.Module):
 
         # quantize
 
-        tokens = rearrange(tokens, 'b t h w d -> b (t h w) d')
+        tokens, packed_fhw_shape = pack([tokens], 'b * d')
 
         vq_mask = None
         if exists(mask):
@@ -761,6 +790,7 @@ class CViViT(nn.Module):
         tokens, indices, commit_loss = self.vq(tokens, mask = vq_mask)
 
         if return_only_codebook_ids:
+            indices, = unpack(indices, packed_fhw_shape, 'b *')
             return indices
 
         tokens = rearrange(tokens, 'b (t h w) d -> b t h w d', h = h, w = w)
@@ -861,6 +891,8 @@ class MaskGit(nn.Module):
         num_tokens,
         max_seq_len,
         gradient_shrink_alpha = 0.1,
+        heads = 8,
+        dim_head = 64,
         **kwargs
     ):
         super().__init__()
@@ -871,10 +903,14 @@ class MaskGit(nn.Module):
 
         self.gradient_shrink_alpha = gradient_shrink_alpha  # used with great success in cogview and GLM 130B attention net
 
+        self.continuous_pos_bias = ContinuousPositionBias(dim = dim_head, heads = heads, num_dims = 3)
+
         self.transformer = Transformer(
             dim = dim,
             attn_num_null_kv = 2,
             has_cross_attn = True,
+            dim_head = dim_head,
+            heads = heads,
             **kwargs
         )
 
@@ -900,12 +936,15 @@ class MaskGit(nn.Module):
         cond_drop_prob = 0.,
         text_mask = None,
         video_mask = None,
+        video_patch_shape = None,
         **kwargs
     ):
         b, n, device = *x.shape, x.device
 
         if not exists(text_mask):
             text_mask = torch.ones((b, n), device = device, dtype = torch.bool)
+
+        rel_pos_bias = self.continuous_pos_bias(*video_patch_shape, device = device)
 
         if cond_drop_prob > 0:
             keep_mask = prob_mask_like((b,), 1 - cond_drop_prob, device = device)
@@ -918,6 +957,7 @@ class MaskGit(nn.Module):
 
         x = self.transformer(
             x,
+            attn_bias = rel_pos_bias,
             self_attn_mask = video_mask,
             cross_attn_context_mask = text_mask,
             **kwargs
@@ -1120,6 +1160,8 @@ class Phenaki(nn.Module):
         if has_prime:
             with torch.no_grad():
                 prime_token_ids = self.cvivit(prime_frames, return_only_codebook_ids = True)
+                patch_shape = prime_token_ids.shape[1:]
+                prime_token_ids = rearrange(prime_token_ids, 'b ... -> b (...)')
 
             prime_token_length = prime_token_ids.shape[-1]
             prime_num_frames = prime_frames.shape[2]
@@ -1131,6 +1173,10 @@ class Phenaki(nn.Module):
         with torch.no_grad():
             text_embeds = self.encode_texts([text], output_device = device)
             text_mask = torch.any(text_embeds != 0, dim = -1)
+
+        # derive video patch shape
+
+        patch_shape = self.cvivit.get_video_patch_shape(num_frames + prime_num_frames, include_first_frame = True)
 
         # get video token ids
 
@@ -1160,6 +1206,7 @@ class Phenaki(nn.Module):
 
             logits = self.maskgit.forward_with_cond_scale(
                 input_token_ids,
+                video_patch_shape = patch_shape,
                 context = text_embeds,
                 text_mask = text_mask,
                 cond_scale = cond_scale
@@ -1219,6 +1266,8 @@ class Phenaki(nn.Module):
             with torch.no_grad():
                 self.cvivit.eval()
                 video_codebook_ids = self.cvivit(videos, return_only_codebook_ids = True)
+                patch_shape = video_codebook_ids.shape[1:]
+                video_codebook_ids = rearrange(video_codebook_ids, 'b ... -> b (...)')
 
         if not exists(text_embeds):
             with torch.no_grad():
@@ -1245,6 +1294,7 @@ class Phenaki(nn.Module):
 
         loss = self.maskgit_trainer(
             video_codebook_ids,
+            video_patch_shape = patch_shape,
             cond_drop_prob = cond_drop_prob,
             video_mask = video_mask,
             text_mask = text_mask,
