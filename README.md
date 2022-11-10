@@ -54,7 +54,7 @@ maskgit = MaskGit(
 cvivit = CViViT(
     dim = 512,
     codebook_size = 5000,
-    image_size = 256,
+    image_size = (256, 128),  # video with rectangular screen allowed
     patch_size = 32,
     temporal_patch_size = 2,
     spatial_depth = 4,
@@ -68,7 +68,7 @@ phenaki = Phenaki(
     maskgit = maskgit
 ).cuda()
 
-videos = torch.randn(3, 3, 17, 256, 256).cuda() # (batch, channels, frames, height, width)
+videos = torch.randn(3, 3, 17, 256, 128).cuda() # (batch, channels, frames, height, width)
 mask = torch.ones((3, 17)).bool().cuda() # [optional] (batch, frames) - allows for co-training videos of different lengths as well as video and images in the same batch
 
 texts = [
