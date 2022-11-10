@@ -54,7 +54,7 @@ maskgit = MaskGit(
 cvivit = CViViT(
     dim = 512,
     codebook_size = 5000,
-    image_size = 256,
+    image_size = (256, 128),  # video with rectangular screen allowed
     patch_size = 32,
     temporal_patch_size = 2,
     spatial_depth = 4,
@@ -68,7 +68,7 @@ phenaki = Phenaki(
     maskgit = maskgit
 ).cuda()
 
-videos = torch.randn(3, 3, 17, 256, 256).cuda() # (batch, channels, frames, height, width)
+videos = torch.randn(3, 3, 17, 256, 128).cuda() # (batch, channels, frames, height, width)
 mask = torch.ones((3, 17)).bool().cuda() # [optional] (batch, frames) - allows for co-training videos of different lengths as well as video and images in the same batch
 
 texts = [
@@ -82,19 +82,19 @@ loss.backward()
 
 # do the above for many steps, then ...
 
-video = phenaki.sample(text = 'a squirrel examines an acorn', num_frames = 17, cond_scale = 5.) # (1, 3, 17, 256, 256)
+video = phenaki.sample(text = 'a squirrel examines an acorn', num_frames = 17, cond_scale = 5.) # (1, 3, 17, 256, 128)
 
 # so in the paper, they do not really achieve 2 minutes of coherent video
 # at each new scene with new text conditioning, they condition on the previous K frames
 # you can easily achieve this with this framework as so
 
-video_prime = video[:, :, -3:] # (1, 3, 3, 256, 256) # say K = 3
+video_prime = video[:, :, -3:] # (1, 3, 3, 256, 128) # say K = 3
 
-video_next = phenaki.sample(text = 'a cat watches the squirrel from afar', prime_frames = video_prime, num_frames = 14) # (1, 3, 14, 256, 256)
+video_next = phenaki.sample(text = 'a cat watches the squirrel from afar', prime_frames = video_prime, num_frames = 14) # (1, 3, 14, 256, 128)
 
 # the total video
 
-entire_video = torch.cat((video, video_next), dim = 2) # (1, 3, 17 + 14, 256, 256)
+entire_video = torch.cat((video, video_next), dim = 2) # (1, 3, 17 + 14, 256, 128)
 
 # and so on...
 ```

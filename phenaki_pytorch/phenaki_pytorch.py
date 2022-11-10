@@ -21,6 +21,11 @@ from phenaki_pytorch.t5 import t5_encode_text, get_encoded_dim, DEFAULT_T5_NAME
 def exists(val):
     return val is not None
 
+def pair(val):
+    ret = (val, val) if not isinstance(val, tuple) else val
+    assert len(ret) == 2
+    return ret
+
 def default(val, d):
     return val if exists(val) else d
 
@@ -209,12 +214,12 @@ class ContinuousPositionBias(nn.Module):
         self.net.append(nn.Linear(dim, heads))
         self.register_buffer('rel_pos', None, persistent = False)
 
-    def forward(self, n, device):
-        fmap_size = int(math.sqrt(n))
+    def forward(self, h, w, device):
 
         if not exists(self.rel_pos):
-            pos = torch.arange(fmap_size, device = device)
-            grid = torch.stack(torch.meshgrid(pos, pos, indexing = 'ij'))
+            pos_h = torch.arange(h, device = device)
+            pos_w = torch.arange(w, device = device)
+            grid = torch.stack(torch.meshgrid(pos_h, pos_w, indexing = 'ij'))
             grid = rearrange(grid, 'c i j -> (i j) c')
             rel_pos = rearrange(grid, 'i c -> i 1 c') - rearrange(grid, 'j c -> 1 j c')
             rel_pos = torch.sign(rel_pos) * torch.log(rel_pos.abs() + 1)
@@ -450,7 +455,7 @@ class Discriminator(nn.Module):
         max_dim = 512
     ):
         super().__init__()
-        num_layers = int(math.log2(image_size) - 1)
+        num_layers = int(math.log2(min(image_size)) - 1)
         blocks = []
 
         layer_dims = [channels] + [(dim * 4) * (2 ** i) for i in range(num_layers + 1)]
@@ -518,21 +523,23 @@ class CViViT(nn.Module):
 
         super().__init__()
 
-        self.image_size = image_size
-        self.patch_size = patch_size
+        self.image_size = pair(image_size)
+        self.patch_size = pair(patch_size)
+        patch_height, patch_width = self.patch_size
+
         self.temporal_patch_size = temporal_patch_size
 
         self.spatial_rel_pos_bias = ContinuousPositionBias(dim = dim, heads = heads)
 
-        assert (self.image_size % self.patch_size) == 0
+        assert (self.image_size[0] % patch_height) == 0 and (self.image_size[1] % patch_width) == 0
 
         self.to_patch_emb_first_frame = nn.Sequential(
-            Rearrange('b c 1 (h p1) (w p2) -> b 1 h w (c p1 p2)', p1 = patch_size, p2 = patch_size),
+            Rearrange('b c 1 (h p1) (w p2) -> b 1 h w (c p1 p2)', p1 = patch_height, p2 = patch_width),
             nn.Linear(channels * patch_size * patch_size, dim)
         )
 
         self.to_patch_emb = nn.Sequential(
-            Rearrange('b c (t pt) (h p1) (w p2) -> b t h w (c pt p1 p2)', p1 = patch_size, p2 = patch_size, pt = temporal_patch_size),
+            Rearrange('b c (t pt) (h p1) (w p2) -> b t h w (c pt p1 p2)', p1 = patch_height, p2 = patch_width, pt = temporal_patch_size),
             nn.Linear(channels * patch_size * patch_size * temporal_patch_size, dim)
         )
 
@@ -546,12 +553,12 @@ class CViViT(nn.Module):
 
         self.to_pixels_first_frame = nn.Sequential(
             nn.Linear(dim, channels * patch_size * patch_size),
-            Rearrange('b 1 h w (c p1 p2) -> b c 1 (h p1) (w p2)', p1 = patch_size, p2 = patch_size)
+            Rearrange('b 1 h w (c p1 p2) -> b c 1 (h p1) (w p2)', p1 = patch_height, p2 = patch_width)
         )
 
         self.to_pixels = nn.Sequential(
             nn.Linear(dim, channels * patch_size * patch_size * temporal_patch_size),
-            Rearrange('b t h w (c pt p1 p2) -> b c (t pt) (h p1) (w p2)', p1 = patch_size, p2 = patch_size, pt = temporal_patch_size),
+            Rearrange('b t h w (c pt p1 p2) -> b c (t pt) (h p1) (w p2)', p1 = patch_height, p2 = patch_width, pt = temporal_patch_size),
         )
 
         # turn off GAN and perceptual loss if grayscale
@@ -592,8 +599,13 @@ class CViViT(nn.Module):
         video_mask = torch.cat((first_frame_mask, rest_vq_mask.any(dim = -1)), dim = -1)
         return repeat(video_mask, 'b f -> b (f hw)', hw = (h // patch_size) * (w // patch_size))
 
+    @property
+    def image_num_tokens(self):
+        return int(self.image_size[0] / self.patch_size[0]) * int(self.image_size[1] / self.patch_size[1])
+
     def frames_per_num_tokens(self, num_tokens):
-        tokens_per_frame = int(self.image_size / self.patch_size) ** 2
+        tokens_per_frame = self.image_num_tokens
+
         assert (num_tokens % tokens_per_frame) == 0, f'number of tokens must be divisible by number of tokens per frame {tokens_per_frame}'
         assert (num_tokens > 0)
 
@@ -601,7 +613,7 @@ class CViViT(nn.Module):
         return (pseudo_frames - 1) * self.temporal_patch_size + 1
 
     def num_tokens_per_frames(self, num_frames, include_first_frame = True):
-        image_num_tokens = int(self.image_size / self.patch_size) ** 2
+        image_num_tokens = self.image_num_tokens
 
         total_tokens = 0
 
@@ -641,11 +653,12 @@ class CViViT(nn.Module):
         tokens
     ):
         b = tokens.shape[0]
-        h = w = (self.image_size // self.patch_size)
+        h = self.image_size[0] // self.patch_size[0]
+        w = self.image_size[1] // self.patch_size[1]
 
         tokens = rearrange(tokens, 'b t h w d -> (b t) (h w) d')
 
-        attn_bias = self.spatial_rel_pos_bias(tokens.shape[-2], device = tokens.device)
+        attn_bias = self.spatial_rel_pos_bias(h, w, device = tokens.device)
 
         tokens = self.enc_spatial_transformer(tokens, attn_bias = attn_bias)
 
@@ -666,7 +679,8 @@ class CViViT(nn.Module):
         tokens
     ):
         b = tokens.shape[0]
-        h = w = (self.image_size // self.patch_size)
+        h = self.image_size[0] // self.patch_size[0]
+        w = self.image_size[1] // self.patch_size[1]
 
         if tokens.ndim == 3:
             tokens = rearrange(tokens, 'b (t h w) d -> b t h w d', h = h, w = w)
@@ -683,7 +697,7 @@ class CViViT(nn.Module):
 
         tokens = rearrange(tokens, 'b t h w d -> (b t) (h w) d')
 
-        attn_bias = self.spatial_rel_pos_bias(tokens.shape[-2], device = tokens.device)
+        attn_bias = self.spatial_rel_pos_bias(h, w, device = tokens.device)
 
         tokens = self.dec_spatial_transformer(tokens, attn_bias = attn_bias)
 
@@ -715,8 +729,8 @@ class CViViT(nn.Module):
         if video.ndim == 4:
             video = rearrange(video, 'b c h w -> b c 1 h w')
 
-        b, c, f, *_ = video.shape
-        assert video.shape[-1] == self.image_size and video.shape[-2] == self.image_size
+        b, c, f, *image_dims = video.shape
+        assert tuple(image_dims) == self.image_size
 
         first_frame, rest_frames = video[:, :, :1], video[:, :, 1:]
 
