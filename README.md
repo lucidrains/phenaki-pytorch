@@ -201,6 +201,7 @@ Now your generations should be greatly improved (but who knows, since this is on
 - [ ] test maskgit + critic alone on oxford flowers dataset
 - [ ] should be able to train for text to image generation first
 - [ ] support rectangular sized videos
+- [ ] add flash attention as an option for all transformers and cite @tridao
 
 ## Citations
 
