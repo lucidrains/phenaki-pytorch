@@ -130,15 +130,12 @@ def l2norm(t):
     return F.normalize(t, dim = -1)
 
 def leaky_relu(p = 0.1):
-    return nn.LeakyReLU(0.1)
+    return nn.LeakyReLU(p)
 
 def safe_div(numer, denom, eps = 1e-8):
     return numer / (denom + eps)
 
 # sampling helpers
-
-def log(t, eps = 1e-20):
-    return torch.log(t + eps)
 
 def gumbel_noise(t):
     noise = torch.zeros_like(t).uniform_(0, 1)
