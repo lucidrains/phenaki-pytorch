@@ -24,6 +24,7 @@ setup(
     'torch>=1.6',
     'torchvision',
     'transformers',
+    'tqdm',
     'vector-quantize-pytorch>=0.10.8'
   ],
   classifiers=[

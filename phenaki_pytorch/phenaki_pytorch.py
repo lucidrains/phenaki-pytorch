@@ -604,20 +604,20 @@ class CViViT(nn.Module):
         layer_dims = [dim * mult for mult in layer_mults]
         dims = (dim, *layer_dims)
 
-        self.discr = Discriminator(dim = discr_base_dim, channels = channels, image_size = image_size)
+        self.discr = Discriminator(dim = discr_base_dim, channels = channels, image_size = self.image_size)
 
         self.discr_loss = hinge_discr_loss if use_hinge_loss else bce_discr_loss
         self.gen_loss = hinge_gen_loss if use_hinge_loss else bce_gen_loss
 
     def calculate_video_token_mask(self, videos, video_frame_mask):
         *_, h, w = videos.shape
-        patch_size = self.patch_size
+        ph, pw = self.patch_size
 
         assert torch.all(((video_frame_mask.sum(dim = -1) - 1) % self.temporal_patch_size) == 0), 'number of frames must be divisible by temporal patch size, subtracting off the first frame'
         first_frame_mask, rest_frame_mask = video_frame_mask[:, :1], video_frame_mask[:, 1:]
         rest_vq_mask = rearrange(rest_frame_mask, 'b (f p) -> b f p', p = self.temporal_patch_size)
         video_mask = torch.cat((first_frame_mask, rest_vq_mask.any(dim = -1)), dim = -1)
-        return repeat(video_mask, 'b f -> b (f hw)', hw = (h // patch_size) * (w // patch_size))
+        return repeat(video_mask, 'b f -> b (f hw)', hw = (h // ph) * (w // pw))
 
     def get_video_patch_shape(self, num_frames, include_first_frame = True):
         patch_frames = 0
@@ -753,17 +753,23 @@ class CViViT(nn.Module):
         video,
         mask = None,
         return_recons = False,
+        return_recons_only = False,
         return_discr_loss = False,
         apply_grad_penalty = True,
         return_only_codebook_ids = False
     ):
         assert video.ndim in {4, 5}
 
-        if video.ndim == 4:
+        is_image = video.ndim == 4
+
+        if is_image:
             video = rearrange(video, 'b c h w -> b c 1 h w')
+            assert not exists(mask)
 
         b, c, f, *image_dims = video.shape
+
         assert tuple(image_dims) == self.image_size
+        assert not exists(mask) or mask.shape[-1] == f
 
         first_frame, rest_frames = video[:, :, :1], video[:, :, 1:]
 
@@ -801,6 +807,11 @@ class CViViT(nn.Module):
 
         recon_video = self.decode(tokens)
 
+        returned_recon = rearrange(recon_video, 'b c 1 h w -> b c h w') if is_image else recon_video.clone()
+
+        if return_recons_only:
+            return returned_recon
+
         if exists(mask):
             # variable lengthed video / images training
             recon_loss = F.mse_loss(video, recon_video, reduction = 'none')
@@ -813,8 +824,6 @@ class CViViT(nn.Module):
 
         if return_discr_loss:
             assert exists(self.discr), 'discriminator must exist to train it'
-
-            recons = recon_video.clone()
 
             # use first frame for now
 
@@ -833,7 +842,7 @@ class CViViT(nn.Module):
                 loss = discr_loss + gp
 
             if return_recons:
-                return loss, recons
+                return loss, returned_recon
 
             return loss
 
@@ -841,7 +850,7 @@ class CViViT(nn.Module):
 
         if not self.use_vgg_and_gan:
             if return_recons:
-                return recon_loss, recon_video
+                return recon_loss, returned_recon
 
             return recon_loss
 
@@ -881,7 +890,7 @@ class CViViT(nn.Module):
         loss = recon_loss + perceptual_loss + commit_loss + adaptive_weight * gen_loss
 
         if return_recons:
-            return loss, recon_video
+            return loss, returned_recon
 
         return loss
 
