@@ -1,5 +1,4 @@
 from math import sqrt
-import copy
 from random import choice
 from pathlib import Path
 from shutil import rmtree
@@ -7,7 +6,6 @@ from PIL import Image
 
 import torch
 from torch import nn
-from torch.cuda.amp import autocast, GradScaler
 from torch.utils.data import Dataset, DataLoader, random_split
 
 import torchvision.transforms as T
