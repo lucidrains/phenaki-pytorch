@@ -144,10 +144,10 @@ class CViViTTrainer(nn.Module):
             train_size = int((1 - valid_frac) * len(self.ds))
             valid_size = len(self.ds) - train_size
             self.ds, self.valid_ds = random_split(self.ds, [train_size, valid_size], generator = torch.Generator().manual_seed(random_split_seed))
-            print(f'training with dataset of {len(self.ds)} samples and validating with randomly splitted {len(self.valid_ds)} samples')
+            self.print(f'training with dataset of {len(self.ds)} samples and validating with randomly splitted {len(self.valid_ds)} samples')
         else:
             self.valid_ds = self.ds
-            print(f'training with shared training and valid dataset of {len(self.ds)} samples')
+            self.print(f'training with shared training and valid dataset of {len(self.ds)} samples')
 
         # dataloader
 
@@ -193,6 +193,9 @@ class CViViTTrainer(nn.Module):
             rmtree(str(self.results_folder))
 
         self.results_folder.mkdir(parents = True, exist_ok = True)
+
+    def print(self, msg):
+        self.accelerator.print(msg)
 
     @property
     def device(self):
@@ -264,7 +267,7 @@ class CViViTTrainer(nn.Module):
 
             # log
 
-            print(f"{steps}: vae loss: {logs['loss']} - discr loss: {logs['discr_loss']}")
+            self.print(f"{steps}: vae loss: {logs['loss']} - discr loss: {logs['discr_loss']}")
 
         # update exponential moving averaged generator
 
@@ -293,7 +296,7 @@ class CViViTTrainer(nn.Module):
 
                 save_image(grid, str(self.results_folder / f'{filename}.png'))
 
-            print(f'{steps}: saving to {str(self.results_folder)}')
+            self.print(f'{steps}: saving to {str(self.results_folder)}')
 
         # save model every so often
 
@@ -306,7 +309,7 @@ class CViViTTrainer(nn.Module):
             model_path = str(self.results_folder / f'vae.{steps}.ema.pt')
             torch.save(ema_state_dict, model_path)
 
-            print(f'{steps}: saving model to {str(self.results_folder)}')
+            self.print(f'{steps}: saving model to {str(self.results_folder)}')
 
         self.steps += 1
         return logs
@@ -318,4 +321,4 @@ class CViViTTrainer(nn.Module):
             logs = self.train_step()
             log_fn(logs)
 
-        print('training complete')
+        self.print('training complete')
