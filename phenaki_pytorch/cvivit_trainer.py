@@ -95,6 +95,8 @@ class CViViTTrainer(nn.Module):
         lr = 3e-4,
         grad_accum_every = 1,
         wd = 0.,
+        max_grad_norm = 0.5,
+        discr_max_grad_norm = None,
         save_results_every = 100,
         save_model_every = 1000,
         results_folder = './results',
@@ -124,8 +126,13 @@ class CViViTTrainer(nn.Module):
         discr_parameters = set(vae.discr.parameters())
         vae_parameters = all_parameters - discr_parameters
 
+        self.vae_parameters = vae_parameters
+
         self.optim = get_optimizer(vae_parameters, lr = lr, wd = wd)
         self.discr_optim = get_optimizer(discr_parameters, lr = lr, wd = wd)
+
+        self.max_grad_norm = max_grad_norm
+        self.discr_max_grad_norm = discr_max_grad_norm
 
         # create dataset
 
@@ -230,13 +237,15 @@ class CViViTTrainer(nn.Module):
 
             accum_log(logs, {'loss': loss.item() / self.grad_accum_every})
 
+        if exists(self.max_grad_norm):
+            self.accelerator.clip_grad_norm_(self.vae.parameters(), self.max_grad_norm)
+
         self.optim.step()
         self.optim.zero_grad()
 
         # update discriminator
 
         if exists(self.vae.discr):
-            discr_loss = 0
             for _ in range(self.grad_accum_every):
                 img = next(self.dl_iter)
                 img = img.to(device)
@@ -246,6 +255,9 @@ class CViViTTrainer(nn.Module):
                 self.accelerator.backward(loss / self.grad_accum_every)
 
                 accum_log(logs, {'discr_loss': loss.item() / self.grad_accum_every})
+
+            if exists(self.discr_max_grad_norm):
+                self.accelerator.clip_grad_norm_(self.vae.discr.parameters(), self.discr_max_grad_norm)
 
             self.discr_optim.step()
             self.discr_optim.zero_grad()
