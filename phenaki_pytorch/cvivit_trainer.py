@@ -22,6 +22,8 @@ from ema_pytorch import EMA
 
 from phenaki_pytorch.phenaki_pytorch import CViViT
 
+from accelerate import Accelerator
+
 # helpers
 
 def exists(val):
@@ -102,10 +104,12 @@ class CViViTTrainer(nn.Module):
         ema_update_after_step = 500,
         ema_update_every = 10,
         apply_grad_penalty_every = 4,
-        amp = False
+        accelerate_kwargs: dict = dict()
     ):
         super().__init__()
         image_size = vae.image_size
+
+        self.accelerator = Accelerator(**accelerate_kwargs)
 
         self.vae = vae
         self.ema_vae = EMA(vae, update_after_step = ema_update_after_step, update_every = ema_update_every)
@@ -122,10 +126,6 @@ class CViViTTrainer(nn.Module):
 
         self.optim = get_optimizer(vae_parameters, lr = lr, wd = wd)
         self.discr_optim = get_optimizer(discr_parameters, lr = lr, wd = wd)
-
-        self.amp = amp
-        self.scaler = GradScaler(enabled = amp)
-        self.discr_scaler = GradScaler(enabled = amp)
 
         # create dataset
 
@@ -144,17 +144,36 @@ class CViViTTrainer(nn.Module):
 
         # dataloader
 
-        self.dl = cycle(DataLoader(
+        self.dl = DataLoader(
             self.ds,
             batch_size = batch_size,
             shuffle = True
-        ))
+        )
 
-        self.valid_dl = cycle(DataLoader(
+        self.valid_dl = DataLoader(
             self.valid_ds,
             batch_size = batch_size,
             shuffle = True
-        ))
+        )
+
+        # prepare with accelerator
+
+        (
+            self.vae,
+            self.optim,
+            self.discr_optim,
+            self.dl,
+            self.valid_dl
+        ) = self.accelerator.prepare(
+            self.vae,
+            self.optim,
+            self.discr_optim,
+            self.dl,
+            self.valid_dl
+        )
+
+        self.dl_iter = cycle(self.dl)
+        self.valid_dl_iter = cycle(self.valid_dl)
 
         self.save_model_every = save_model_every
         self.save_results_every = save_results_every
@@ -168,8 +187,25 @@ class CViViTTrainer(nn.Module):
 
         self.results_folder.mkdir(parents = True, exist_ok = True)
 
+    @property
+    def device(self):
+        return self.accelerator.device
+
+    @property
+    def is_distributed(self):
+        return not (self.accelerator.distributed_type == DistributedType.NO and self.accelerator.num_processes == 1)
+
+    @property
+    def is_main(self):
+        return self.accelerator.is_main_process
+
+    @property
+    def is_local_main(self):
+        return self.accelerator.is_local_main_process
+
     def train_step(self):
-        device = next(self.vae.parameters()).device
+        device = self.device
+
         steps = int(self.steps.item())
         apply_grad_penalty = not (steps % self.apply_grad_penalty_every)
 
@@ -182,21 +218,19 @@ class CViViTTrainer(nn.Module):
         # update vae (generator)
 
         for _ in range(self.grad_accum_every):
-            img = next(self.dl)
+            img = next(self.dl_iter)
             img = img.to(device)
 
-            with autocast(enabled = self.amp):
-                loss = self.vae(
-                    img,
-                    apply_grad_penalty = apply_grad_penalty
-                )
+            loss = self.vae(
+                img,
+                apply_grad_penalty = apply_grad_penalty
+            )
 
-                self.scaler.scale(loss / self.grad_accum_every).backward()
+            self.accelerator.backward(loss / self.grad_accum_every)
 
             accum_log(logs, {'loss': loss.item() / self.grad_accum_every})
 
-        self.scaler.step(self.optim)
-        self.scaler.update()
+        self.optim.step()
         self.optim.zero_grad()
 
         # update discriminator
@@ -204,18 +238,16 @@ class CViViTTrainer(nn.Module):
         if exists(self.vae.discr):
             discr_loss = 0
             for _ in range(self.grad_accum_every):
-                img = next(self.dl)
+                img = next(self.dl_iter)
                 img = img.to(device)
 
-                with autocast(enabled = self.amp):
-                    loss = self.vae(img, return_discr_loss = True)
+                loss = self.vae(img, return_discr_loss = True)
 
-                    self.discr_scaler.scale(loss / self.grad_accum_every).backward()
+                self.accelerator.backward(loss / self.grad_accum_every)
 
                 accum_log(logs, {'discr_loss': loss.item() / self.grad_accum_every})
 
-            self.discr_scaler.step(self.discr_optim)
-            self.discr_scaler.update()
+            self.discr_optim.step()
             self.discr_optim.zero_grad()
 
             # log
@@ -224,15 +256,16 @@ class CViViTTrainer(nn.Module):
 
         # update exponential moving averaged generator
 
-        self.ema_vae.update()
+        if self.is_main:
+            self.ema_vae.update()
 
         # sample results every so often
 
-        if not (steps % self.save_results_every):
+        if self.is_main and not (steps % self.save_results_every):
             for model, filename in ((self.ema_vae.ema_model, f'{steps}.ema'), (self.vae, str(steps))):
                 model.eval()
 
-                imgs = next(self.dl)
+                imgs = next(self.valid_dl_iter)
                 imgs = imgs.to(device)
 
                 recons = model(imgs, return_recons_only = True)
@@ -252,7 +285,7 @@ class CViViTTrainer(nn.Module):
 
         # save model every so often
 
-        if not (steps % self.save_model_every):
+        if self.is_main and not (steps % self.save_model_every):
             state_dict = self.vae.state_dict()
             model_path = str(self.results_folder / f'vae.{steps}.pt')
             torch.save(state_dict, model_path)
