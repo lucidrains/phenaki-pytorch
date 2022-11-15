@@ -174,6 +174,8 @@ Now your generations should be greatly improved (but who knows, since this is on
 
 - <a href="https://huggingface.co/">🤗 Huggingface</a> for their amazing transformers and accelerate library
 
+- <a href="https://github.com/gmegh">Guillem</a> for his ongoing contributions
+
 ## Todo
 
 - [x] pass mask probability into maskgit and auto-mask and get cross entropy loss
