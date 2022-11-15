@@ -21,6 +21,7 @@ setup(
     'accelerate',
     'einops>=0.6',
     'ema-pytorch',
+    'opencv-python',
     'torch>=1.6',
     'torchvision',
     'transformers',
