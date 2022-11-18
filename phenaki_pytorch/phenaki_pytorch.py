@@ -1149,6 +1149,24 @@ class Phenaki(nn.Module):
         assert cond_drop_prob > 0.
         self.cond_drop_prob = cond_drop_prob # classifier free guidance for transformers - @crowsonkb
 
+    def sample_image(
+        self,
+        *,
+        text,
+        cond_scale = 3.,
+        starting_temperature = 0.9,
+        noise_K = 1.
+    ):
+        single_framed_video = self.sample(
+            text = text,
+            num_frames = 1,
+            cond_scale = cond_scale,
+            starting_temperature = starting_temperature,
+            noise_K = noise_K
+        )
+
+        return rearrange(single_framed_video, 'b c 1 h w -> b c h w')
+
     @eval_decorator
     @torch.no_grad()
     def sample(
