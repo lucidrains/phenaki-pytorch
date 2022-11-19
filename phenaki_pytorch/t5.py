@@ -96,8 +96,8 @@ def t5_encode_text(
         encoded_text = encoded_text.masked_fill(~attn_mask, 0.)
         return encoded_text
 
-    encoded_text.to(output_device)
-    attn_mask.to(output_device)
+    encoded_text = encoded_text.to(output_device)
+    attn_mask = attn_mask.to(output_device)
 
     encoded_text = encoded_text.masked_fill(~attn_mask, 0.)
     return encoded_text

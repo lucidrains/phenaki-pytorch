@@ -148,9 +148,15 @@ critic_trainer = CriticTrainer(
     critic = critic
 )
 
-video_codes = torch.randint(0, 5000, (4, 1024))
+texts = [
+    'a whale breaching from afar',
+    'young girl blowing out candles on her birthday cake',
+    'fireworks with blue and green sparkles'
+]
 
-loss = critic_trainer(video_codes)
+video_codes = torch.randint(0, 5000, (3, 1024))
+
+loss = critic_trainer(video_codes, texts = texts)
 loss.backward()
 ```
 
@@ -187,24 +193,27 @@ Now your generations should be greatly improved (but who knows, since this is on
 - [x] alibi pos bias for temporal attention
 - [x] give spatial attention the most powerful positional bias
 - [x] make sure to use stylegan-esque discriminator
+- [x] 3d relative positional bias for maskgit
+- [x] make sure maskgit can also support training of images, and make sure it works on local machine
+- [x] also build option for token critic to be conditioned with the text
+- [x] should be able to train for text to image generation first
 
-- [ ] 3d relative positional bias for maskgit
+- [ ] unconditional generations (both video and images)
+- [ ] make sure critic trainer can take in cvivit and automatically pass in video patch shape for relative positional bias - make sure critic also gets optimal relative positional bias
 - [ ] add depthwise-convs to cvivit for position generating
 - [ ] wire up accelerate for multi-gpu training for both c-vivit and maskgit
 - [ ] some basic video manipulation code, allow for sampled tensor to be saved as gif
-- [ ] make sure maskgit can also support training of images, and make sure it works on local machine
 - [ ] training code for cvivit
-- [ ] also build option for token critic to be conditioned with the text
 - [ ] add all top of the line research for stabilizing transformers training
 - [ ] bring in concatenative token shift (temporal dimension)
 - [ ] add a DDPM upsampler, either port from imagen-pytorch or just rewrite a simple version here
 - [ ] outfit customizable self attention blocks to stylegan discriminator
 - [ ] take care of masking in maskgit
 - [ ] test maskgit + critic alone on oxford flowers dataset
-- [ ] should be able to train for text to image generation first
 - [ ] support rectangular sized videos
-- [ ] unconditional generations (both video and images)
 - [ ] add flash attention as an option for all transformers and cite @tridao
+- [ ] abstract out text conditioning module into own package, and take care of audiolm-pytorch at the same time
+- [ ] move cvivit into own file
 
 ## Citations
 

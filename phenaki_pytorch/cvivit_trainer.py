@@ -4,6 +4,8 @@ from pathlib import Path
 from shutil import rmtree
 from PIL import Image
 
+from typeguard import typechecked
+
 import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader, random_split
@@ -82,6 +84,7 @@ class ImageDataset(Dataset):
 
 # main trainer class
 
+@typechecked
 class CViViTTrainer(nn.Module):
     def __init__(
         self,

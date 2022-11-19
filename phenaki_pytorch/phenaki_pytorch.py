@@ -1,7 +1,9 @@
 import copy
 import math
 from functools import partial, wraps
+
 from typing import Optional, List, Union
+from typeguard import typechecked
 
 import torch
 import torch.nn.functional as F
@@ -957,7 +959,9 @@ class MaskGit(nn.Module):
         if not exists(text_mask):
             text_mask = torch.ones((b, n), device = device, dtype = torch.bool)
 
-        rel_pos_bias = self.continuous_pos_bias(*video_patch_shape, device = device)
+        rel_pos_bias = None
+        if exists(video_patch_shape):
+            rel_pos_bias = self.continuous_pos_bias(*video_patch_shape, device = device)
 
         if cond_drop_prob > 0:
             keep_mask = prob_mask_like((b,), 1 - cond_drop_prob, device = device)
@@ -1020,9 +1024,12 @@ class TokenCritic(nn.Module):
         dim,
         num_tokens,
         max_seq_len,
+        has_cross_attn = False,
         **kwargs
     ):
         super().__init__()
+        self.has_cross_attn = has_cross_attn
+
         self.mask_id = num_tokens
 
         self.token_emb = nn.Embedding(num_tokens + 1, dim) # last token is used as mask_id
@@ -1030,6 +1037,7 @@ class TokenCritic(nn.Module):
 
         self.transformer = Transformer(
             dim = dim,
+            has_cross_attn = has_cross_attn,
             **kwargs
         )
 
@@ -1038,24 +1046,61 @@ class TokenCritic(nn.Module):
             Rearrange('... 1 -> ...')
         )
 
+    def forward_with_cond_scale(
+        self,
+        *args,
+        cond_scale = 3,
+        **kwargs
+    ):
+        logits = self.forward(*args, cond_drop_prob = 0., **kwargs)
 
-    def forward(self, x, **kwargs):
-        n, device = x.shape[1], x.device
+        if cond_scale == 1:
+            return logits
+
+        null_logits = self.forward(*args, cond_drop_prob = 1., **kwargs)
+        return null_logits + (logits - null_logits) * cond_scale
+
+    def forward(
+        self,
+        x,
+        text_mask = None,
+        cond_drop_prob = None,
+        context = None,
+        **kwargs
+    ):
+        b, n, device = *x.shape, x.device
+
+        if not exists(text_mask):
+            text_mask = torch.ones((b, n), device = device, dtype = torch.bool)
+
+        if exists(context) and cond_drop_prob > 0:
+            keep_mask = prob_mask_like((b,), 1 - cond_drop_prob, device = device)
+            text_mask = rearrange(keep_mask, 'b -> b 1') & text_mask
 
         x = self.token_emb(x)
         x = self.pos_emb(torch.arange(n, device = device)) + x
 
-        x = self.transformer(x, **kwargs)
+        x = self.transformer(
+            x,
+            context = context,
+            cross_attn_context_mask = text_mask,
+            **kwargs
+        )
 
         return self.to_logits(x)
 
+@typechecked
 class CriticTrainer(nn.Module):
     def __init__(
         self,
         *,
-        maskgit,
-        critic,
-        temperature = 0.
+        maskgit: MaskGit,
+        critic: TokenCritic,
+        temperature = 0.,
+        t5_name = DEFAULT_T5_NAME,
+        text_embed_dim = None,
+        cond_drop_prob = 0.25,
+        max_text_len = 128
     ):
         super().__init__()
         self.maskgit = maskgit
@@ -1064,10 +1109,29 @@ class CriticTrainer(nn.Module):
         self.critic = critic
         self.temperature = temperature
 
-    def forward(self, x, **kwargs):
+        # text conditioning
+
+        text_embed_dim = default(text_embed_dim, get_encoded_dim(t5_name))
+        self.encode_texts = partial(t5_encode_text, name = t5_name)
+        self.text_embed_dim = text_embed_dim
+        self.max_text_len = max_text_len
+
+        assert cond_drop_prob > 0.
+        self.cond_drop_prob = cond_drop_prob # classifier free guidance for transformers - @crowsonkb
+
+    def forward(
+        self,
+        x,
+        texts: Optional[List[str]] = None,
+        text_embeds = None,
+        cond_drop_prob = None,
+        **kwargs
+    ):
         batch, seq, device = *x.shape, x.device
 
         self.critic.train()
+
+        # get time and number of tokens to mask
 
         rand_time = uniform((1,), device)
         num_tokens_mask = (seq * torch.cos(rand_time * math.pi * 0.5)).round().long().clamp(min = 1) # cosine schedule was best
@@ -1080,11 +1144,30 @@ class CriticTrainer(nn.Module):
 
         masked_input = torch.where(mask, self.mask_id, x)
 
+        # get text conditioning
+
+        if not exists(text_embeds):
+            with torch.no_grad():
+                text_embeds = self.encode_texts(texts, output_device = device)
+
+        text_mask = torch.any(text_embeds != 0, dim = -1) # save the researcher from having to think about mask, by assuming if all of the feature dimension is 0, it is masked out
+
+        # condition dropout for Katherine's (@crowsonkb) version of classifier free guidance for transformers
+
+        cond_drop_prob = default(cond_drop_prob, self.cond_drop_prob)
+
         # predict masked tokens
 
         with torch.no_grad():
             self.maskgit.eval()
-            logits = self.maskgit(masked_input, **kwargs)
+
+            logits = self.maskgit(
+                masked_input,
+                context = text_embeds,
+                text_mask = text_mask,
+                cond_drop_prob = cond_drop_prob,
+                **kwargs
+            )
 
         # sample the predicted masked tokens
 
@@ -1097,7 +1180,20 @@ class CriticTrainer(nn.Module):
 
         critic_input = torch.where(mask, pred_video_ids, x)
 
-        pred_fake_or_real_logits = self.critic(critic_input)
+        # critic may or may not need text conditioning
+
+        critic_kwargs = dict()
+        if self.critic.has_cross_attn:
+            critic_kwargs = dict(
+                context = text_embeds,
+                text_mask = text_mask,
+                cond_drop_prob = cond_drop_prob
+            )
+
+        pred_fake_or_real_logits = self.critic(
+            critic_input,
+            **critic_kwargs
+        )
 
         critic_loss = F.binary_cross_entropy_with_logits(
             pred_fake_or_real_logits,
@@ -1108,6 +1204,7 @@ class CriticTrainer(nn.Module):
 
 # main class
 
+@typechecked
 class Phenaki(nn.Module):
     def __init__(
         self,
@@ -1253,8 +1350,20 @@ class Phenaki(nn.Module):
 
             if not is_last_step:
                 if exists(self.critic):
+                    critic_kwargs = dict()
+
+                    if self.critic.has_cross_attn:
+                        critic_kwargs = dict(
+                            context = text_embeds,
+                            text_mask = text_mask,
+                            cond_csale = cond_scale
+                        )
+
                     with torch.no_grad():
-                        scores = self.critic(video_token_ids)
+                        scores = self.critic(
+                            video_token_ids,
+                            **critic_kwargs
+                        )
 
                     noise = noise_K * (uniform(scores.shape, device) - 0.5) * (steps_til_x0 / self.steps)
                     scores = scores + noise
@@ -1336,6 +1445,7 @@ class Phenaki(nn.Module):
 
 # make video function
 
+@typechecked
 def make_video(
     phenaki: Phenaki,
     texts: List[str],
