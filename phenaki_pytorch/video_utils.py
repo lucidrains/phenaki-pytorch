@@ -1,10 +1,16 @@
 import torch
-import glob
-import numpy as np
-import cv2
 from torchvision import transforms as T
 
-def fromVideoToTensor(path, num_frames=-1, crop = False):
+import cv2
+import numpy as np
+from einops import rearrange
+
+def video_to_tensor(
+    path,
+    num_frames = -1,
+    crop = False,
+    crop_size = 256
+):
     '''
     Generate Pytorch tensor from .mp4 video
 
@@ -28,6 +34,7 @@ def fromVideoToTensor(path, num_frames=-1, crop = False):
         H - video height
         W - video width
     '''
+
     # Import the video and cut it into frames.
     video = cv2.VideoCapture(path)
 
@@ -37,15 +44,23 @@ def fromVideoToTensor(path, num_frames=-1, crop = False):
     while check:
         check, frame = video.read()
         if crop:
-            frame = crop_center(frame, 256, 256)
-        frames.append(np.expand_dims(frame, axis=0))
+            frame = crop_center(frame, crop_size, crop_size)
 
-    frames = np.array(np.concatenate(frames[:-1],axis=0))  # convert list of frames to numpy array
-    frames_torch = torch.tensor(np.expand_dims(np.transpose(frames, (3,0,1,2)), axis=0 )).float()
+        frames.append(rearrange(frame, '... -> 1 ...'))
+
+    frames = np.array(np.concatenate(frames[:-1], axis = 0))  # convert list of frames to numpy array
+    frames = rearrange(frames, 'f h w c -> 1 c f h w')
+
+    frames_torch = torch.tensor(frames).float()
     
     return frames_torch[:, :, :num_frames, :, :]
 
-def fromTensorToVideo(tensor, path, fps = 25):
+def tensor_to_video(
+    tensor,
+    path,
+    fps = 25,
+    video_format = 'MP4V'
+):
     '''
     Generate .mp4 from Pytorch video tensor
 
@@ -68,17 +83,16 @@ def fromTensorToVideo(tensor, path, fps = 25):
     # Import the video and cut it into frames.
     tensor = tensor.cpu()
     
-    frame_width = int(tensor.shape[4])
-    frame_height = int(tensor.shape[3])
+    num_frames, height, width = tensor.shape[-2:]
     
-    fourcc = cv2.VideoWriter_fourcc(*'MP4V') # Changes in this line can allow for different video formats.
-    video = cv2.VideoWriter(path, fourcc, fps, (frame_width, frame_height))
+    fourcc = cv2.VideoWriter_fourcc(*video_format) # Changes in this line can allow for different video formats.
+    video = cv2.VideoWriter(path, fourcc, fps, (width, height))
 
     frames = []
     check = True
 
-    for idx in range(tensor.shape[2]):
-        frame = np.uint8(np.transpose(tensor[0, :, idx, :, :].numpy().T, (1, 0, 2)))
+    for idx in range(num_frames):
+        frame = np.uint8(np.transpose(tensor[0, :, idx, :, :].numpy().T, (1, 0, 2))) # refactor this with einops
         video.write(frame)
     
     video.release()
@@ -88,7 +102,11 @@ def fromTensorToVideo(tensor, path, fps = 25):
     
     return video
 
-def crop_center(img, cropx, cropy):
+def crop_center(
+    img,
+    cropx,
+    cropy
+):
     '''
     Crop image
 
