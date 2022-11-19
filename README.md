@@ -182,6 +182,8 @@ Now your generations should be greatly improved (but who knows, since this is on
 
 - <a href="https://github.com/gmegh">Guillem</a> for his ongoing contributions
 
+- You? If you are a great machine learning engineer and / or researcher, feel free to contribute to the frontier of open source generative AI
+
 ## Todo
 
 - [x] pass mask probability into maskgit and auto-mask and get cross entropy loss
