@@ -20,7 +20,7 @@ from phenaki_pytorch.optimizer import get_optimizer
 
 from ema_pytorch import EMA
 
-from phenaki_pytorch.phenaki_pytorch import CViViT
+from phenaki_pytorch.cvivit import CViViT
 
 from accelerate import Accelerator
 
