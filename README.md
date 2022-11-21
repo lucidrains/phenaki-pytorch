@@ -77,7 +77,7 @@ texts = [
     'fireworks with blue and green sparkles'
 ]
 
-loss = phenaki(videos, texts, video_frame_mask = mask)
+loss = phenaki(videos, texts = texts, video_frame_mask = mask)
 loss.backward()
 
 # do the above for many steps, then ...
@@ -215,8 +215,8 @@ Now your generations should be greatly improved (but who knows, since this is on
 - [x] make sure critic trainer can take in cvivit and automatically pass in video patch shape for relative positional bias - make sure critic also gets optimal relative positional bias
 - [x] training code for cvivit
 - [x] move cvivit into own file
+- [x] unconditional generations (both video and images)
 
-- [ ] unconditional generations (both video and images)
 - [ ] add depthwise-convs to cvivit for position generating
 - [ ] wire up accelerate for multi-gpu training for both c-vivit and maskgit
 - [ ] some basic video manipulation code, allow for sampled tensor to be saved as gif

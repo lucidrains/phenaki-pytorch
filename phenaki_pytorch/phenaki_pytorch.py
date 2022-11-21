@@ -110,10 +110,12 @@ class MaskGit(nn.Module):
         gradient_shrink_alpha = 0.1,
         heads = 8,
         dim_head = 64,
+        unconditional = False,
         **kwargs
     ):
         super().__init__()
         self.mask_id = num_tokens
+        self.unconditional = unconditional
 
         self.token_emb = nn.Embedding(num_tokens + 1, dim) # last token is used as mask_id
         self.pos_emb = nn.Embedding(max_seq_len, dim)
@@ -125,7 +127,7 @@ class MaskGit(nn.Module):
         self.transformer = Transformer(
             dim = dim,
             attn_num_null_kv = 2,
-            has_cross_attn = True,
+            has_cross_attn = not self.unconditional,
             dim_head = dim_head,
             heads = heads,
             **kwargs
@@ -323,10 +325,14 @@ class CriticTrainer(nn.Module):
             self.cvivit = cvivit.copy_for_eval()
 
         self.maskgit = maskgit
+        self.unconditional = maskgit.unconditional
+
         self.mask_id = maskgit.mask_id
 
         self.critic = critic
         self.temperature = temperature
+
+        assert not (maskgit.unconditional and critic.has_cross_attn), 'critic does not need cross attention if maskgit is unconditional'
 
         # text conditioning
 
@@ -380,15 +386,21 @@ class CriticTrainer(nn.Module):
 
         # get text conditioning
 
-        if not exists(text_embeds):
-            with torch.no_grad():
-                text_embeds = self.encode_texts(texts, output_device = device)
+        text_mask = None
+        cond_drop_prob = 0
 
-        text_mask = torch.any(text_embeds != 0, dim = -1) # save the researcher from having to think about mask, by assuming if all of the feature dimension is 0, it is masked out
+        if not self.unconditional:
+            if not exists(text_embeds):
+                with torch.no_grad():
+                    text_embeds = self.encode_texts(texts, output_device = device)
 
-        # condition dropout for Katherine's (@crowsonkb) version of classifier free guidance for transformers
+            text_mask = torch.any(text_embeds != 0, dim = -1) # save the researcher from having to think about mask, by assuming if all of the feature dimension is 0, it is masked out
 
-        cond_drop_prob = default(cond_drop_prob, self.cond_drop_prob)
+            # condition dropout for Katherine's (@crowsonkb) version of classifier free guidance for transformers
+
+            cond_drop_prob = default(cond_drop_prob, self.cond_drop_prob)
+
+        # get the input back to the original video token shape
 
         masked_input, = unpack(masked_input, codebook_packed_shape, 'b *')
 
@@ -462,6 +474,8 @@ class Phenaki(nn.Module):
         self.cvivit = cvivit.copy_for_eval()
 
         self.maskgit = maskgit
+        self.unconditional = maskgit.unconditional
+
         self.mask_id = maskgit.mask_id
         self.maskgit_trainer = MaskGitTrainWrapper(maskgit, steps = steps)
 
@@ -623,6 +637,7 @@ class Phenaki(nn.Module):
     def forward(
         self,
         videos = None,
+        *,
         texts: Optional[List[str]] = None,
         video_codebook_ids = None,
         video_frame_mask = None,
@@ -631,8 +646,8 @@ class Phenaki(nn.Module):
     ):
         assert exists(videos) ^ exists(video_codebook_ids), 'either raw video or '
         assert not (exists(videos) and not exists(self.cvivit)), 'cvivit must be provided if one wants to encode the videos live during training'
+        assert (exists(text_embeds) ^ exists(texts)) ^ self.unconditional, 'either raw text of text embeds must be given'
 
-        assert exists(text_embeds) ^ exists(texts), 'either raw text of text embeds must be given'
         assert not (exists(text_embeds) and text_embeds.shape[-1] != self.text_embed_dim), 'text embedding dimension is not correct'
 
         if not exists(video_codebook_ids):
@@ -645,17 +660,21 @@ class Phenaki(nn.Module):
                 self.cvivit.eval()
                 video_codebook_ids = self.cvivit(videos, return_only_codebook_ids = True)
 
-        if not exists(text_embeds):
-            with torch.no_grad():
-                text_embeds = self.encode_texts(texts, output_device = video_codebook_ids.device)
+        # derive text embeddings, mask, conditional dropout
 
-        batch, device = text_embeds.shape[0], text_embeds.device
+        text_mask = None
+        cond_drop_prob = 0
 
-        text_mask = torch.any(text_embeds != 0, dim = -1) # save the researcher from having to think about mask, by assuming if all of the feature dimension is 0, it is masked out
+        if not self.unconditional:
+            if not exists(text_embeds):
+                with torch.no_grad():
+                    text_embeds = self.encode_texts(texts, output_device = video_codebook_ids.device)
 
-        # condition dropout for Katherine's (@crowsonkb) version of classifier free guidance for transformers
+            text_mask = torch.any(text_embeds != 0, dim = -1) # save the researcher from having to think about mask, by assuming if all of the feature dimension is 0, it is masked out
 
-        cond_drop_prob = default(cond_drop_prob, self.cond_drop_prob)
+            # condition dropout for Katherine's (@crowsonkb) version of classifier free guidance for transformers
+
+            cond_drop_prob = default(cond_drop_prob, self.cond_drop_prob)
 
         # calculate video frame mask
 
