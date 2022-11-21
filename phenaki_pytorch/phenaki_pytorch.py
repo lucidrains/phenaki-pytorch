@@ -1,5 +1,5 @@
-import copy
 import math
+import functools
 from functools import partial, wraps
 
 from typing import Optional, List, Union
@@ -8,9 +8,8 @@ from typeguard import typechecked
 import torch
 import torch.nn.functional as F
 from torch import nn, einsum
-import torchvision
 
-from einops import rearrange, repeat, unpack, pack
+from einops import rearrange, repeat, pack, unpack
 from einops.layers.torch import Rearrange
 
 from phenaki_pytorch.t5 import t5_encode_text, get_encoded_dim, DEFAULT_T5_NAME
@@ -28,6 +27,12 @@ def default(val, d):
 
 def cast_tuple(val, length = 1):
     return val if isinstance(val, tuple) else (val,) * length
+
+def reduce_mult(arr):
+    return functools.reduce(lambda x, y: x * y, arr)
+
+def divisible_by(numer, denom):
+    return (numer % denom) == 0
 
 # tensor helpers
 
@@ -151,14 +156,20 @@ class MaskGit(nn.Module):
         video_patch_shape = None,
         **kwargs
     ):
+        assert x.ndim in {2, 4}, 'video token ids must be of shape (batch, seq) or (batch, frame, height, width)'
+
+        if x.ndim == 4:
+            video_patch_shape = x.shape[1:]
+            x = rearrange(x, 'b ... -> b (...)')
+
         b, n, device = *x.shape, x.device
 
         if not exists(text_mask):
             text_mask = torch.ones((b, n), device = device, dtype = torch.bool)
 
-        rel_pos_bias = None
-        if exists(video_patch_shape):
-            rel_pos_bias = self.continuous_pos_bias(*video_patch_shape, device = device)
+        assert exists(video_patch_shape), 'video patch shape must be given'
+
+        rel_pos_bias = self.continuous_pos_bias(*video_patch_shape, device = device)
 
         if cond_drop_prob > 0:
             keep_mask = prob_mask_like((b,), 1 - cond_drop_prob, device = device)
@@ -193,6 +204,8 @@ class MaskGitTrainWrapper(nn.Module):
         self.steps = steps
 
     def forward(self, x, video_mask = None, **kwargs):
+        x, packed_shape = pack([x], 'b *')
+
         batch, seq, device = *x.shape, x.device
 
         self.maskgit.train()
@@ -206,6 +219,8 @@ class MaskGitTrainWrapper(nn.Module):
         mask_token_mask = get_mask_subset_with_prob(video_mask, mask_token_prob)
 
         masked_input = torch.where(mask_token_mask, self.mask_id, x)
+
+        masked_input, = unpack(masked_input, packed_shape, 'b *')
 
         logits = self.maskgit(masked_input, video_mask = video_mask, **kwargs)
 
@@ -265,6 +280,8 @@ class TokenCritic(nn.Module):
         context = None,
         **kwargs
     ):
+        x = rearrange(x, 'b ... -> b (...)')
+
         b, n, device = *x.shape, x.device
 
         if not exists(text_mask):
@@ -293,6 +310,7 @@ class CriticTrainer(nn.Module):
         *,
         maskgit: MaskGit,
         critic: TokenCritic,
+        cvivit: Optional[CViViT] = None,
         temperature = 0.,
         t5_name = DEFAULT_T5_NAME,
         text_embed_dim = None,
@@ -300,6 +318,10 @@ class CriticTrainer(nn.Module):
         max_text_len = 128
     ):
         super().__init__()
+
+        if exists(cvivit):
+            self.cvivit = cvivit.copy_for_eval()
+
         self.maskgit = maskgit
         self.mask_id = maskgit.mask_id
 
@@ -318,12 +340,27 @@ class CriticTrainer(nn.Module):
 
     def forward(
         self,
-        x,
+        *,
+        videos = None,
+        video_codebook_ids = None,
         texts: Optional[List[str]] = None,
         text_embeds = None,
         cond_drop_prob = None,
         **kwargs
     ):
+        # derive codebook ids
+
+        if not exists(video_codebook_ids):
+            assert exists(self.cvivit)
+
+            self.cvivit.eval()
+            with torch.no_grad():
+                video_codebook_ids = self.cvivit(videos, return_only_codebook_ids = True)
+
+        assert video_codebook_ids.ndim == 4
+
+        x, codebook_packed_shape = pack([video_codebook_ids], 'b *')
+
         batch, seq, device = *x.shape, x.device
 
         self.critic.train()
@@ -352,6 +389,8 @@ class CriticTrainer(nn.Module):
         # condition dropout for Katherine's (@crowsonkb) version of classifier free guidance for transformers
 
         cond_drop_prob = default(cond_drop_prob, self.cond_drop_prob)
+
+        masked_input, = unpack(masked_input, codebook_packed_shape, 'b *')
 
         # predict masked tokens
 
@@ -386,6 +425,8 @@ class CriticTrainer(nn.Module):
                 text_mask = text_mask,
                 cond_drop_prob = cond_drop_prob
             )
+
+        critic_input, = unpack(critic_input, codebook_packed_shape, 'b *')
 
         pred_fake_or_real_logits = self.critic(
             critic_input,
@@ -603,8 +644,6 @@ class Phenaki(nn.Module):
             with torch.no_grad():
                 self.cvivit.eval()
                 video_codebook_ids = self.cvivit(videos, return_only_codebook_ids = True)
-                patch_shape = video_codebook_ids.shape[1:]
-                video_codebook_ids = rearrange(video_codebook_ids, 'b ... -> b (...)')
 
         if not exists(text_embeds):
             with torch.no_grad():
@@ -631,7 +670,6 @@ class Phenaki(nn.Module):
 
         loss = self.maskgit_trainer(
             video_codebook_ids,
-            video_patch_shape = patch_shape,
             cond_drop_prob = cond_drop_prob,
             video_mask = video_mask,
             text_mask = text_mask,

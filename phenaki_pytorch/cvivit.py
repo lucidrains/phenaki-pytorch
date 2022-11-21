@@ -24,6 +24,9 @@ def exists(val):
 def default(val, d):
     return val if exists(val) else d
 
+def divisible_by(numer, denom):
+    return (numer % denom) == 0
+
 def leaky_relu(p = 0.1):
     return nn.LeakyReLU(p)
 
@@ -428,6 +431,7 @@ class CViViT(nn.Module):
 
         assert tuple(image_dims) == self.image_size
         assert not exists(mask) or mask.shape[-1] == f
+        assert divisible_by(f - 1, self.temporal_patch_size), f'number of frames ({f}) minus one ({f - 1}) must be divisible by temporal patch size ({self.temporal_patch_size})'
 
         first_frame, rest_frames = video[:, :, :1], video[:, :, 1:]
 

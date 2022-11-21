@@ -127,6 +127,18 @@ A <a href="https://arxiv.org/abs/2209.04439">new paper</a> suggests that instead
 import torch
 from phenaki_pytorch import CViViT, MaskGit, TokenCritic, CriticTrainer
 
+cvivit = CViViT(
+    dim = 512,
+    codebook_size = 5000,
+    image_size = (256, 128),
+    patch_size = 32,
+    temporal_patch_size = 2,
+    spatial_depth = 4,
+    temporal_depth = 4,
+    dim_head = 64,
+    heads = 8
+)
+
 maskgit = MaskGit(
     num_tokens = 5000,
     max_seq_len = 1024,
@@ -145,8 +157,9 @@ critic = TokenCritic(
 
 critic_trainer = CriticTrainer(
     maskgit = maskgit,
-    critic = critic
-)
+    critic = critic,
+    cvivit = cvivit
+).cuda()
 
 texts = [
     'a whale breaching from afar',
@@ -154,9 +167,9 @@ texts = [
     'fireworks with blue and green sparkles'
 ]
 
-video_codes = torch.randint(0, 5000, (3, 1024))
+videos = torch.randn(3, 3, 3, 256, 128).cuda() # (batch, channels, frames, height, width)
 
-loss = critic_trainer(video_codes, texts = texts)
+loss = critic_trainer(videos = videos, texts = texts)
 loss.backward()
 ```
 
@@ -199,13 +212,14 @@ Now your generations should be greatly improved (but who knows, since this is on
 - [x] make sure maskgit can also support training of images, and make sure it works on local machine
 - [x] also build option for token critic to be conditioned with the text
 - [x] should be able to train for text to image generation first
+- [x] make sure critic trainer can take in cvivit and automatically pass in video patch shape for relative positional bias - make sure critic also gets optimal relative positional bias
+- [x] training code for cvivit
+- [x] move cvivit into own file
 
 - [ ] unconditional generations (both video and images)
-- [ ] make sure critic trainer can take in cvivit and automatically pass in video patch shape for relative positional bias - make sure critic also gets optimal relative positional bias
 - [ ] add depthwise-convs to cvivit for position generating
 - [ ] wire up accelerate for multi-gpu training for both c-vivit and maskgit
 - [ ] some basic video manipulation code, allow for sampled tensor to be saved as gif
-- [ ] training code for cvivit
 - [ ] add all top of the line research for stabilizing transformers training
 - [ ] bring in concatenative token shift (temporal dimension)
 - [ ] add a DDPM upsampler, either port from imagen-pytorch or just rewrite a simple version here
@@ -215,7 +229,6 @@ Now your generations should be greatly improved (but who knows, since this is on
 - [ ] support rectangular sized videos
 - [ ] add flash attention as an option for all transformers and cite @tridao
 - [ ] abstract out text conditioning module into own package, and take care of audiolm-pytorch at the same time
-- [ ] move cvivit into own file
 
 ## Citations
 
