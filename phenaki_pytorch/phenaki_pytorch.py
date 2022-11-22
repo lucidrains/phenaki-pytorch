@@ -467,7 +467,8 @@ class Phenaki(nn.Module):
         sample_temperature = 0.,
         text_embed_dim = None,
         cond_drop_prob = 0.25,
-        max_text_len = 128
+        max_text_len = 128,
+        critic_noise_anneal_schedule = 'decay'
     ):
         super().__init__()
 
@@ -485,6 +486,8 @@ class Phenaki(nn.Module):
             critic = critic.eval()
 
         self.critic = critic
+        self.critic_noise_anneal_schedule = critic_noise_anneal_schedule
+
         self.steps = steps
         self.sample_temperature = sample_temperature
 
@@ -617,7 +620,20 @@ class Phenaki(nn.Module):
                             **critic_kwargs
                         )
 
-                    noise = noise_K * (uniform(scores.shape, device) - 0.5) * (steps_til_x0 / self.steps)
+                    # different types of annealing
+
+                    if self.critic_noise_anneal_schedule == 'fixed':
+                        noise_multiplier = 1.
+                    elif self.critic_noise_anneal_schedule == 'decay':
+                        noise_multiplier = steps_til_x0 / self.steps
+                    elif self.critic_noise_anneal_schedule == 'increase':
+                        noise_multiplier = (step + 1) / self.steps
+                    else:
+                        raise ValueError(f'invalid critic noise anneal schedule name')
+
+                    # noise to add to critic scores
+
+                    noise = noise_K * (uniform(scores.shape, device) - 0.5) * noise_multiplier
                     scores = scores + noise
                 else:
                     scores = logits.gather(2, rearrange(pred_video_ids, '... -> ... 1'))
