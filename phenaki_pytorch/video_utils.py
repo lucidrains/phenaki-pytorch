@@ -46,7 +46,8 @@ def video_to_tensor(
         if crop:
             frame = crop_center(frame, crop_size, crop_size)
 
-        frames.append(rearrange(frame, '... -> 1 ...'))
+        if check:
+            frames.append(rearrange(frame, '... -> 1 ...'))
 
     frames = np.array(np.concatenate(frames[:-1], axis = 0))  # convert list of frames to numpy array
     frames = rearrange(frames, 'f h w c -> 1 c f h w')
@@ -83,7 +84,7 @@ def tensor_to_video(
     # Import the video and cut it into frames.
     tensor = tensor.cpu()
     
-    num_frames, height, width = tensor.shape[-2:]
+    num_frames, height, width = tensor.shape[-3:]
     
     fourcc = cv2.VideoWriter_fourcc(*video_format) # Changes in this line can allow for different video formats.
     video = cv2.VideoWriter(path, fourcc, fps, (width, height))
