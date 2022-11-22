@@ -115,7 +115,9 @@ class CViViTTrainer(nn.Module):
         self.accelerator = Accelerator(**accelerate_kwargs)
 
         self.vae = vae
-        self.ema_vae = EMA(vae, update_after_step = ema_update_after_step, update_every = ema_update_every)
+
+        if self.is_main:
+            self.ema_vae = EMA(vae, update_after_step = ema_update_after_step, update_every = ema_update_every)
 
         self.register_buffer('steps', torch.Tensor([0]))
 
@@ -232,10 +234,11 @@ class CViViTTrainer(nn.Module):
             img = next(self.dl_iter)
             img = img.to(device)
 
-            loss = self.vae(
-                img,
-                apply_grad_penalty = apply_grad_penalty
-            )
+            with self.accelerator.autocast():
+                loss = self.vae(
+                    img,
+                    apply_grad_penalty = apply_grad_penalty
+                )
 
             self.accelerator.backward(loss / self.grad_accum_every)
 
