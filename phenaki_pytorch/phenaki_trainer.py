@@ -27,6 +27,8 @@ from accelerate import Accelerator
 
 from phenaki_pytorch.phenaki_pytorch import Phenaki
 
+from phenaki_pytorch.data import ImageDataset, VideoDataset
+
 # helpers functions
 
 def exists(x):
@@ -104,9 +106,9 @@ class PhenakiTrainer(object):
         phenaki: Phenaki,
         folder,
         *,
+        train_on_images = False,
         train_batch_size = 16,
         gradient_accumulate_every = 1,
-        augment_horizontal_flip = True,
         train_lr = 1e-4,
         train_num_steps = 100000,
         max_grad_norm = None,
@@ -123,7 +125,6 @@ class PhenakiTrainer(object):
         convert_image_to = None
     ):
         super().__init__()
-
         maskgit = phenaki.maskgit
         cvivit = phenaki.cvivit
 
@@ -153,7 +154,13 @@ class PhenakiTrainer(object):
 
         # dataset and dataloader
 
-        self.ds = Dataset(folder, self.image_size, augment_horizontal_flip = augment_horizontal_flip, convert_image_to = convert_image_to)
+        dataset_klass = ImageDataset if train_on_images else VideoDataset
+
+        if train_on_images:
+            self.ds = ImageDataset(folder, self.image_size)
+        else:
+            self.ds = VideoDataset(folder, self.image_size)
+
         dl = DataLoader(self.ds, batch_size = train_batch_size, shuffle = True, pin_memory = True, num_workers = cpu_count())
 
         dl = self.accelerator.prepare(dl)

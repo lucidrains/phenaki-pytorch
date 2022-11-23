@@ -2,7 +2,6 @@ from math import sqrt
 from random import choice
 from pathlib import Path
 from shutil import rmtree
-from PIL import Image
 
 from beartype import beartype
 
@@ -21,6 +20,7 @@ from phenaki_pytorch.optimizer import get_optimizer
 from ema_pytorch import EMA
 
 from phenaki_pytorch.cvivit import CViViT
+from phenaki_pytorch.data import ImageDataset, VideoDataset
 
 from accelerate import Accelerator
 
@@ -50,38 +50,6 @@ def accum_log(log, new_logs):
         log[key] = old_value + new_value
     return log
 
-# classes
-
-class ImageDataset(Dataset):
-    def __init__(
-        self,
-        folder,
-        image_size,
-        exts = ['jpg', 'jpeg', 'png']
-    ):
-        super().__init__()
-        self.folder = folder
-        self.image_size = image_size
-        self.paths = [p for ext in exts for p in Path(f'{folder}').glob(f'**/*.{ext}')]
-
-        print(f'{len(self.paths)} training samples found at {folder}')
-
-        self.transform = T.Compose([
-            T.Lambda(lambda img: img.convert('RGB') if img.mode != 'RGB' else img),
-            T.Resize(image_size),
-            T.RandomHorizontalFlip(),
-            T.CenterCrop(image_size),
-            T.ToTensor()
-        ])
-
-    def __len__(self):
-        return len(self.paths)
-
-    def __getitem__(self, index):
-        path = self.paths[index]
-        img = Image.open(path)
-        return self.transform(img)
-
 # main trainer class
 
 @beartype
@@ -93,6 +61,7 @@ class CViViTTrainer(nn.Module):
         num_train_steps,
         batch_size,
         folder,
+        train_on_images = False,
         lr = 3e-4,
         grad_accum_every = 1,
         wd = 0.,
@@ -139,7 +108,12 @@ class CViViTTrainer(nn.Module):
 
         # create dataset
 
-        self.ds = ImageDataset(folder, image_size = image_size)
+        dataset_klass = ImageDataset if train_on_images else VideoDataset
+
+        if train_on_images:
+            self.ds = ImageDataset(folder, image_size)
+        else:
+            self.ds = VideoDataset(folder, image_size)
 
         # split for validation
 
