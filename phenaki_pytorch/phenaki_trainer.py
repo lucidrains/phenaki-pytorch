@@ -6,7 +6,7 @@ from functools import partial
 from collections import namedtuple
 from multiprocessing import cpu_count
 
-from typeguard import typechecked
+from beartype import beartype
 
 import torch
 from torch import nn, einsum
@@ -97,7 +97,7 @@ class Dataset(Dataset):
 
 # trainer class
 
-@typechecked
+@beartype
 class PhenakiTrainer(object):
     def __init__(
         self,

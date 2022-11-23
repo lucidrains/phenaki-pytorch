@@ -19,6 +19,7 @@ setup(
   ],
   install_requires=[
     'accelerate',
+    'beartype',
     'einops>=0.6',
     'ema-pytorch',
     'opencv-python',
@@ -27,7 +28,6 @@ setup(
     'torch>=1.6',
     'torchvision',
     'transformers',
-    'typeguard',
     'tqdm',
     'vector-quantize-pytorch>=0.10.8'
   ],

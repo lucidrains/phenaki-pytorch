@@ -4,7 +4,7 @@ from pathlib import Path
 from shutil import rmtree
 from PIL import Image
 
-from typeguard import typechecked
+from beartype import beartype
 
 import torch
 from torch import nn
@@ -84,7 +84,7 @@ class ImageDataset(Dataset):
 
 # main trainer class
 
-@typechecked
+@beartype
 class CViViTTrainer(nn.Module):
     def __init__(
         self,

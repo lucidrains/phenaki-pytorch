@@ -3,7 +3,7 @@ import functools
 from functools import partial, wraps
 
 from typing import Optional, List, Union
-from typeguard import typechecked
+from beartype import beartype
 
 import torch
 import torch.nn.functional as F
@@ -305,7 +305,7 @@ class TokenCritic(nn.Module):
 
         return self.to_logits(x)
 
-@typechecked
+@beartype
 class CriticTrainer(nn.Module):
     def __init__(
         self,
@@ -454,7 +454,7 @@ class CriticTrainer(nn.Module):
 
 # main class
 
-@typechecked
+@beartype
 class Phenaki(nn.Module):
     def __init__(
         self,
@@ -715,7 +715,7 @@ class Phenaki(nn.Module):
 
 # make video function
 
-@typechecked
+@beartype
 def make_video(
     phenaki: Phenaki,
     texts: List[str],
