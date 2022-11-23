@@ -32,6 +32,11 @@ def cast_num_frames(t, *, frames):
 
     return F.pad(t, (0, 0, 0, 0, 0, frames - f))
 
+def convert_image_to_fn(img_type, image):
+    if image.mode != img_type:
+        return image.convert(img_type)
+    return image
+
 # image related helpers fnuctions and dataset
 
 class ImageDataset(Dataset):
