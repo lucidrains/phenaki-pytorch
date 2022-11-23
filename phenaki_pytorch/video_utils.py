@@ -5,6 +5,54 @@ import cv2
 import numpy as np
 from einops import rearrange
 
+# handle reading and writing gif
+
+CHANNELS_TO_MODE = {
+    1 : 'L',
+    3 : 'RGB',
+    4 : 'RGBA'
+}
+
+def seek_all_images(img, channels = 3):
+    assert channels in CHANNELS_TO_MODE, f'channels {channels} invalid'
+    mode = CHANNELS_TO_MODE[channels]
+
+    i = 0
+    while True:
+        try:
+            img.seek(i)
+            yield img.convert(mode)
+        except EOFError:
+            break
+        i += 1
+
+# tensor of shape (channels, frames, height, width) -> gif
+
+def video_tensor_to_gif(
+    tensor,
+    path,
+    duration = 120,
+    loop = 0,
+    optimize = True
+):
+    images = map(T.ToPILImage(), tensor.unbind(dim = 1))
+    first_img, *rest_imgs = images
+    first_img.save(path, save_all = True, append_images = rest_imgs, duration = duration, loop = loop, optimize = optimize)
+    return images
+
+# gif -> (channels, frame, height, width) tensor
+
+def gif_to_tensor(
+    path,
+    channels = 3,
+    transform = T.ToTensor()
+):
+    img = Image.open(path)
+    tensors = tuple(map(transform, seek_all_images(img, channels = channels)))
+    return torch.stack(tensors, dim = 1)
+
+# handle reading and writing mp4
+
 def video_to_tensor(
     path,
     num_frames = -1,
@@ -90,15 +138,14 @@ def tensor_to_video(
     video = cv2.VideoWriter(path, fourcc, fps, (width, height))
 
     frames = []
-    check = True
 
     for idx in range(num_frames):
-        frame = np.uint8(np.transpose(tensor[0, :, idx, :, :].numpy().T, (1, 0, 2))) # refactor this with einops
-        video.write(frame)
+        numpy_frame = tensor[0, :, idx, :, :].numpy()
+        numpy_frame = np.uint8(rearrange(numpy_frame, 'c h w -> h w c'))
+        video.write(numpy_frame)
     
     video.release()
 
-    # Closes all the frames
     cv2.destroyAllWindows()
     
     return video
@@ -128,8 +175,8 @@ def crop_center(
     '''
     try:
         y,x,c = img.shape
-        startx = x//2 - cropx//2
-        starty = y//2 - cropy//2    
+        startx = x // 2 - cropx // 2
+        starty = y // 2 - cropy // 2
         return img[starty:starty+cropy, startx:startx+cropx, :]
     except: 
         pass
