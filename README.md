@@ -23,6 +23,7 @@ from phenaki_pytorch import CViViT
 cvivit = CViViT(
     dim = 512,
     codebook_size = 5000,
+    image_size = 256,
     patch_size = 32,
     temporal_patch_size = 2,
     spatial_depth = 4,

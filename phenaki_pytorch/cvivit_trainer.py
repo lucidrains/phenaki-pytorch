@@ -73,8 +73,8 @@ class CViViTTrainer(nn.Module):
         valid_frac = 0.05,
         random_split_seed = 42,
         ema_beta = 0.995,
-        ema_update_after_step = 500,
-        ema_update_every = 10,
+        ema_update_after_step = 0,
+        ema_update_every = 1,
         apply_grad_penalty_every = 4,
         accelerate_kwargs: dict = dict()
     ):
@@ -86,6 +86,7 @@ class CViViTTrainer(nn.Module):
         self.vae = vae
 
         if self.is_main:
+            print('ema')
             self.ema_vae = EMA(vae, update_after_step = ema_update_after_step, update_every = ema_update_every)
 
         self.register_buffer('steps', torch.Tensor([0]))
@@ -250,6 +251,7 @@ class CViViTTrainer(nn.Module):
         # update exponential moving averaged generator
 
         if self.is_main:
+            print('hmmmm')
             self.ema_vae.update()
 
         # sample results every so often

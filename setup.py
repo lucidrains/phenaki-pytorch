@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
   name = 'phenaki-pytorch',
   packages = find_packages(exclude=[]),
-  version = '0.0.38',
+  version = '0.0.39',
   license='MIT',
   description = 'Phenaki - Pytorch',
   author = 'Phil Wang',
@@ -21,7 +21,7 @@ setup(
     'accelerate',
     'beartype',
     'einops>=0.6',
-    'ema-pytorch',
+    'ema-pytorch>=0.1.0',
     'opencv-python',
     'pillow',
     'numpy',
