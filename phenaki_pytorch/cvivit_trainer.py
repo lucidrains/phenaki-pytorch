@@ -72,6 +72,7 @@ class CViViTTrainer(nn.Module):
         results_folder = './results',
         valid_frac = 0.05,
         random_split_seed = 42,
+        use_ema = True,
         ema_beta = 0.995,
         ema_update_after_step = 0,
         ema_update_every = 1,
@@ -85,8 +86,8 @@ class CViViTTrainer(nn.Module):
 
         self.vae = vae
 
-        if self.is_main:
-            print('ema')
+        self.use_ema = use_ema
+        if self.is_main and use_ema:
             self.ema_vae = EMA(vae, update_after_step = ema_update_after_step, update_every = ema_update_every)
 
         self.register_buffer('steps', torch.Tensor([0]))
@@ -250,14 +251,18 @@ class CViViTTrainer(nn.Module):
 
         # update exponential moving averaged generator
 
-        if self.is_main:
-            print('hmmmm')
+        if self.is_main and self.use_ema:
             self.ema_vae.update()
 
         # sample results every so often
 
         if self.is_main and not (steps % self.save_results_every):
-            for model, filename in ((self.ema_vae.ema_model, f'{steps}.ema'), (self.vae, str(steps))):
+            vaes_to_evaluate = ((self.vae, str(steps)),)
+
+            if self.use_ema:
+                vaes_to_evaluate = ((self.ema_vae.ema_model, f'{steps}.ema'),) + vae_to_evaluate
+
+            for model, filename in vaes_to_evaluate:
                 model.eval()
 
                 imgs = next(self.valid_dl_iter)
@@ -285,9 +290,10 @@ class CViViTTrainer(nn.Module):
             model_path = str(self.results_folder / f'vae.{steps}.pt')
             torch.save(state_dict, model_path)
 
-            ema_state_dict = self.ema_vae.state_dict()
-            model_path = str(self.results_folder / f'vae.{steps}.ema.pt')
-            torch.save(ema_state_dict, model_path)
+            if self.use_ema:
+                ema_state_dict = self.ema_vae.state_dict()
+                model_path = str(self.results_folder / f'vae.{steps}.ema.pt')
+                torch.save(ema_state_dict, model_path)
 
             self.print(f'{steps}: saving model to {str(self.results_folder)}')
 
