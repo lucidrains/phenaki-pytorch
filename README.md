@@ -52,14 +52,6 @@ Phenaki
 import torch
 from phenaki_pytorch import CViViT, MaskGit, Phenaki
 
-maskgit = MaskGit(
-    num_tokens = 5000,
-    max_seq_len = 1024,
-    dim = 512,
-    dim_context = 768,
-    depth = 6,
-)
-
 cvivit = CViViT(
     dim = 512,
     codebook_size = 5000,
@@ -70,6 +62,16 @@ cvivit = CViViT(
     temporal_depth = 4,
     dim_head = 64,
     heads = 8
+)
+
+cvivit.load('/path/to/trained/cvivit.pt')
+
+maskgit = MaskGit(
+    num_tokens = 5000,
+    max_seq_len = 1024,
+    dim = 512,
+    dim_context = 768,
+    depth = 6,
 )
 
 phenaki = Phenaki(

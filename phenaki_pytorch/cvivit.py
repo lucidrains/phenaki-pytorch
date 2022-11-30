@@ -336,6 +336,12 @@ class CViViT(nn.Module):
     def load_state_dict(self, *args, **kwargs):
         return super().load_state_dict(*args, **kwargs)
 
+    def load(self, path):
+        path = Path(path)
+        assert path.exists()
+        pt = torch.load(str(path))
+        self.load_state_dict(pt)
+
     def decode_from_codebook_indices(self, indices):
         codes = self.vq.codebook[indices]
         return self.decode(codes)

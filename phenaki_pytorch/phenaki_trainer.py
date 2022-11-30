@@ -68,8 +68,9 @@ class PhenakiTrainer(object):
         folder,
         *,
         train_on_images = False,
-        train_batch_size = 16,
-        gradient_accumulate_every = 1,
+        batch_size = 16,
+        grad_accum_every = 1,
+        num_frames = 17,
         train_lr = 1e-4,
         train_num_steps = 100000,
         max_grad_norm = None,
@@ -105,8 +106,8 @@ class PhenakiTrainer(object):
         self.num_samples = num_samples
         self.save_and_sample_every = save_and_sample_every
 
-        self.batch_size = train_batch_size
-        self.gradient_accumulate_every = gradient_accumulate_every
+        self.batch_size = batch_size
+        self.grad_accum_every = grad_accum_every
 
         self.max_grad_norm = max_grad_norm
 
@@ -120,9 +121,9 @@ class PhenakiTrainer(object):
         if train_on_images:
             self.ds = ImageDataset(folder, self.image_size)
         else:
-            self.ds = VideoDataset(folder, self.image_size)
+            self.ds = VideoDataset(folder, self.image_size, num_frames = num_frames)
 
-        dl = DataLoader(self.ds, batch_size = train_batch_size, shuffle = True, pin_memory = True, num_workers = cpu_count())
+        dl = DataLoader(self.ds, batch_size = batch_size, shuffle = True, pin_memory = True, num_workers = cpu_count())
 
         dl = self.accelerator.prepare(dl)
         self.dl = cycle(dl)
@@ -198,12 +199,12 @@ class PhenakiTrainer(object):
 
                 total_loss = 0.
 
-                for _ in range(self.gradient_accumulate_every):
+                for _ in range(self.grad_accum_every):
                     data = next(self.dl).to(device)
 
                     with self.accelerator.autocast():
                         loss = self.model(data)
-                        loss = loss / self.gradient_accumulate_every
+                        loss = loss / self.grad_accum_every
                         total_loss += loss.item()
 
                     self.accelerator.backward(loss)
