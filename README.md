@@ -18,7 +18,7 @@ C-ViViT
 
 ```python
 import torch
-from phenaki_pytorch import CViViT
+from phenaki_pytorch import CViViT, CViViTTrainer
 
 cvivit = CViViT(
     dim = 512,
@@ -32,10 +32,18 @@ cvivit = CViViT(
     heads = 8
 ).cuda()
 
-video = torch.randn(1, 3, 17, 256, 256).cuda() # (batch, channels, frames + 1 leading frame, image height, image width)
+trainer = CViViTTrainer(
+    cvivit,
+    folder = '/home/phil/dl/phenaki-pytorch',
+    batch_size = 4,
+    grad_accum_every = 4,
+    train_on_images = False,  # you can train on images first, before fine tuning on video, for sample efficiency
+    use_ema = False,          # recommended to be turned on (keeps exponential moving averaged cvivit) unless if you don't have enough resources
+    num_train_steps = 10000
+)
 
-loss = cvivit(video)
-loss.backward()
+trainer.train()               # reconstructions and checkpoints will be saved periodically to ./results
+
 ```
 
 Phenaki

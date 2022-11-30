@@ -62,6 +62,7 @@ class CViViTTrainer(nn.Module):
         batch_size,
         folder,
         train_on_images = False,
+        num_frames = 17,
         lr = 3e-4,
         grad_accum_every = 1,
         wd = 0.,
@@ -115,7 +116,7 @@ class CViViTTrainer(nn.Module):
         if train_on_images:
             self.ds = ImageDataset(folder, image_size)
         else:
-            self.ds = VideoDataset(folder, image_size)
+            self.ds = VideoDataset(folder, image_size, num_frames = num_frames)
 
         # split for validation
 
@@ -265,7 +266,11 @@ class CViViTTrainer(nn.Module):
             for model, filename in vaes_to_evaluate:
                 model.eval()
 
-                imgs = next(self.valid_dl_iter)
+                valid_data = next(self.valid_dl_iter)
+
+                # for now, only save reconstructed images
+                imgs = valid_data[:, :, 0] if valid_data.ndim == 5 else valid_data
+
                 imgs = imgs.to(device)
 
                 recons = model(imgs, return_recons_only = True)

@@ -21,6 +21,9 @@ def exists(val):
 def identity(t, *args, **kwargs):
     return t
 
+def pair(val):
+    return val if isinstance(val, tuple) else (val, val)
+
 def cast_num_frames(t, *, frames):
     f = t.shape[1]
 
@@ -133,11 +136,11 @@ def video_to_tensor(
     while check:
         check, frame = video.read()
 
-        if exists(crop_size):
-            frame = crop_center(frame, crop_size, crop_size)
-
         if not check:
             continue
+
+        if exists(crop_size):
+            frame = crop_center(frame, *pair(crop_size))
 
         frames.append(rearrange(frame, '... -> 1 ...'))
 
@@ -180,13 +183,10 @@ def crop_center(
     cropx,      # Length of the final image in the x direction.
     cropy       # Length of the final image in the y direction.
 ) -> torch.Tensor:
-    try:
-        y, x, c = img.shape
-        startx = x // 2 - cropx // 2
-        starty = y // 2 - cropy // 2
-        return img[starty:(starty + cropy), startx:(startx + cropx), :]
-    except:
-        pass
+    y, x, c = img.shape
+    startx = x // 2 - cropx // 2
+    starty = y // 2 - cropy // 2
+    return img[starty:(starty + cropy), startx:(startx + cropx), :]
 
 # video dataset
 
@@ -196,7 +196,7 @@ class VideoDataset(Dataset):
         folder,
         image_size,
         channels = 3,
-        num_frames = 16,
+        num_frames = 17,
         horizontal_flip = False,
         force_num_frames = True,
         exts = ['gif', 'mp4']
