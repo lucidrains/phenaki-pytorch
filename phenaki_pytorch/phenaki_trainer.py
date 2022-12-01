@@ -193,50 +193,58 @@ class PhenakiTrainer(object):
         if exists(self.accelerator.scaler) and exists(data['scaler']):
             self.accelerator.scaler.load_state_dict(data['scaler'])
 
-    def train(self):
+    def train_step(self):
         accelerator = self.accelerator
         device = self.device
 
-        with tqdm(initial = self.step, total = self.train_num_steps, disable = not self.is_main) as pbar:
+        total_loss = 0.
+
+        for _ in range(self.grad_accum_every):
+            data = next(self.dl).to(device)
+
+            with self.accelerator.autocast():
+                loss = self.model(data)
+                loss = loss / self.grad_accum_every
+                total_loss += loss.item()
+
+            self.accelerator.backward(loss)
+
+        if exists(self.max_grad_norm):
+            accelerator.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+
+        accelerator.wait_for_everyone()
+
+        self.opt.step()
+        self.opt.zero_grad()
+
+        accelerator.wait_for_everyone()
+
+        if self.is_main and self.step % self.save_and_sample_every == 0:
+            self.model.eval()
+            milestone = self.step // self.save_and_sample_every
+
+            with torch.no_grad():
+                batches = num_to_groups(self.num_samples, self.batch_size)
+                sampled_video = self.model.sample(num_frames = self.sample_num_frames)
+
+            video_tensor_to_gif(sampled_video[0], str(self.results_folder / f'{milestone}.gif'))
+            self.save(milestone)
+
+        self.step += 1
+        return total_loss
+
+    def train(self):
+
+        with tqdm(
+            initial = self.step,
+            total = self.train_num_steps,
+            disable = not self.is_main
+        ) as pbar:
 
             while self.step < self.train_num_steps:
+                loss = self.train_step()
 
-                total_loss = 0.
-
-                for _ in range(self.grad_accum_every):
-                    data = next(self.dl).to(device)
-
-                    with self.accelerator.autocast():
-                        loss = self.model(data)
-                        loss = loss / self.grad_accum_every
-                        total_loss += loss.item()
-
-                    self.accelerator.backward(loss)
-
-                if exists(self.max_grad_norm):
-                    accelerator.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
-
-                pbar.set_description(f'loss: {total_loss:.4f}')
-
-                accelerator.wait_for_everyone()
-
-                self.opt.step()
-                self.opt.zero_grad()
-
-                accelerator.wait_for_everyone()
-
-                if self.is_main and self.step % self.save_and_sample_every == 0:
-                    self.model.eval()
-                    milestone = self.step // self.save_and_sample_every
-
-                    with torch.no_grad():
-                        batches = num_to_groups(self.num_samples, self.batch_size)
-                        sampled_video = self.model.sample(num_frames = self.sample_num_frames)
-
-                    video_tensor_to_gif(sampled_video[0], str(self.results_folder / f'{milestone}.gif'))
-                    self.save(milestone)
-
-                self.step += 1
+                pbar.set_description(f'loss: {loss:.4f}')
                 pbar.update(1)
 
         self.print('training complete')
