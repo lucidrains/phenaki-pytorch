@@ -222,18 +222,18 @@ class PhenakiTrainer(object):
                 accelerator.wait_for_everyone()
 
                 self.step += 1
-                if accelerator.is_main_process:
-                    if self.step != 0 and self.step % self.save_and_sample_every == 0:
-                        self.model.eval()
 
-                        with torch.no_grad():
-                            milestone = self.step // self.save_and_sample_every
-                            batches = num_to_groups(self.num_samples, self.batch_size)
-                            all_images_list = list(map(lambda n: self.model.sample(batch_size=n), batches))
+                if self.is_main and self.step % self.save_and_sample_every == 0:
+                    self.model.eval()
+                    milestone = self.step // self.save_and_sample_every
 
-                        all_images = torch.cat(all_images_list, dim = 0)
-                        utils.save_image(all_images, str(self.results_folder / f'sample-{milestone}.png'), nrow = int(math.sqrt(self.num_samples)))
-                        self.save(milestone)
+                    with torch.no_grad():
+                        batches = num_to_groups(self.num_samples, self.batch_size)
+                        all_images_list = list(map(lambda n: self.model.sample(batch_size = n), batches))
+
+                    all_images = torch.cat(all_images_list, dim = 0)
+                    utils.save_image(all_images, str(self.results_folder / f'sample-{milestone}.png'), nrow = int(math.sqrt(self.num_samples)))
+                    self.save(milestone)
 
                 pbar.update(1)
 

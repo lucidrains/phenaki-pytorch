@@ -216,7 +216,7 @@ class VideoDataset(Dataset):
 
         # functions to transform video path to tensor
 
-        self.gif_to_tensor = partial(gif_to_tensor, channels = self.channels, transformer = self.transform)
+        self.gif_to_tensor = partial(gif_to_tensor, channels = self.channels, transform = self.transform)
         self.mp4_to_tensor = partial(video_to_tensor, crop_size = self.image_size)
 
         self.cast_num_frames_fn = partial(cast_num_frames, frames = num_frames) if force_num_frames else identity
