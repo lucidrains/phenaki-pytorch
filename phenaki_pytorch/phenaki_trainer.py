@@ -27,7 +27,7 @@ from accelerate import Accelerator
 
 from phenaki_pytorch.phenaki_pytorch import Phenaki
 
-from phenaki_pytorch.data import ImageDataset, VideoDataset
+from phenaki_pytorch.data import ImageDataset, VideoDataset, video_tensor_to_gif
 
 # helpers functions
 
@@ -71,6 +71,7 @@ class PhenakiTrainer(object):
         batch_size = 16,
         grad_accum_every = 1,
         num_frames = 17,
+        sample_num_frames = None,
         train_lr = 1e-4,
         train_num_steps = 100000,
         max_grad_norm = None,
@@ -118,6 +119,8 @@ class PhenakiTrainer(object):
 
         dataset_klass = ImageDataset if train_on_images else VideoDataset
 
+        self.sample_num_frames = default(sample_num_frames, num_frames)
+
         if train_on_images:
             self.ds = ImageDataset(folder, self.image_size)
         else:
@@ -139,6 +142,9 @@ class PhenakiTrainer(object):
         # prepare model, dataloader, optimizer with accelerator
 
         self.model, self.opt = self.accelerator.prepare(self.model, self.opt)
+
+        self.results_folder = Path(results_folder)
+        assert self.results_folder.exists()
 
     def print(self, msg):
         self.accelerator.print(msg)
@@ -167,7 +173,6 @@ class PhenakiTrainer(object):
             'step': self.step,
             'model': self.accelerator.get_state_dict(self.model),
             'opt': self.opt.state_dict(),
-            'ema': self.ema.state_dict(),
             'scaler': self.accelerator.scaler.state_dict() if exists(self.accelerator.scaler) else None
         }
 
@@ -184,7 +189,6 @@ class PhenakiTrainer(object):
 
         self.step = data['step']
         self.opt.load_state_dict(data['opt'])
-        self.ema.load_state_dict(data['ema'])
 
         if exists(self.accelerator.scaler) and exists(data['scaler']):
             self.accelerator.scaler.load_state_dict(data['scaler'])
@@ -221,20 +225,18 @@ class PhenakiTrainer(object):
 
                 accelerator.wait_for_everyone()
 
-                self.step += 1
-
                 if self.is_main and self.step % self.save_and_sample_every == 0:
                     self.model.eval()
                     milestone = self.step // self.save_and_sample_every
 
                     with torch.no_grad():
                         batches = num_to_groups(self.num_samples, self.batch_size)
-                        all_images_list = list(map(lambda n: self.model.sample(batch_size = n), batches))
+                        sampled_video = self.model.sample(num_frames = self.sample_num_frames)
 
-                    all_images = torch.cat(all_images_list, dim = 0)
-                    utils.save_image(all_images, str(self.results_folder / f'sample-{milestone}.png'), nrow = int(math.sqrt(self.num_samples)))
+                    video_tensor_to_gif(sampled_video[0], str(self.results_folder / f'{milestone}.gif'))
                     self.save(milestone)
 
+                self.step += 1
                 pbar.update(1)
 
         self.print('training complete')

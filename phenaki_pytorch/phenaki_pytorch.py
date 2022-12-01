@@ -524,8 +524,8 @@ class Phenaki(nn.Module):
     def sample(
         self,
         *,
-        text,
         num_frames,
+        text = None,
         prime_frames = None,
         cond_scale = 3.,
         starting_temperature = 0.9,
@@ -553,9 +553,12 @@ class Phenaki(nn.Module):
 
         # get text embeds and mask
 
-        with torch.no_grad():
-            text_embeds = self.encode_texts([text], output_device = device)
-            text_mask = torch.any(text_embeds != 0, dim = -1)
+        text_embeds = text_mask = None
+
+        if exists(text):
+            with torch.no_grad():
+                text_embeds = self.encode_texts([text], output_device = device)
+                text_mask = torch.any(text_embeds != 0, dim = -1)
 
         # derive video patch shape
 
