@@ -20,7 +20,7 @@ from phenaki_pytorch.optimizer import get_optimizer
 from ema_pytorch import EMA
 
 from phenaki_pytorch.cvivit import CViViT
-from phenaki_pytorch.data import ImageDataset, VideoDataset
+from phenaki_pytorch.data import ImageDataset, VideoDataset, video_tensor_to_gif
 
 from accelerate import Accelerator
 
@@ -268,23 +268,33 @@ class CViViTTrainer(nn.Module):
 
                 valid_data = next(self.valid_dl_iter)
 
-                # for now, only save reconstructed images
-                imgs = valid_data[:, :, 0] if valid_data.ndim == 5 else valid_data
+                is_video = valid_data.ndim == 5
 
-                imgs = imgs.to(device)
+                valid_data = valid_data.to(device)
 
-                recons = model(imgs, return_recons_only = True)
-                nrows = int(sqrt(self.batch_size))
+                recons = model(valid_data, return_recons_only = True)
 
-                imgs_and_recons = torch.stack((imgs, recons), dim = 0)
-                imgs_and_recons = rearrange(imgs_and_recons, 'r b ... -> (b r) ...')
+                # if is video, save gifs to folder
+                # else save a grid of images
 
-                imgs_and_recons = imgs_and_recons.detach().cpu().float().clamp(0., 1.)
-                grid = make_grid(imgs_and_recons, nrow = 2, normalize = True, value_range = (0, 1))
+                if is_video:
+                    sampled_videos_path = self.results_folder / f'samples.{filename}'
+                    (sampled_videos_path).mkdir(parents = True, exist_ok = True)
 
-                logs['reconstructions'] = grid
+                    for tensor in recons.unbind(dim = 0):
+                        video_tensor_to_gif(tensor, str(sampled_videos_path / f'{filename}.gif'))
+                else:
+                    nrows = int(sqrt(self.batch_size))
 
-                save_image(grid, str(self.results_folder / f'{filename}.png'))
+                    imgs_and_recons = torch.stack((valid_data, recons), dim = 0)
+                    imgs_and_recons = rearrange(imgs_and_recons, 'r b ... -> (b r) ...')
+
+                    imgs_and_recons = imgs_and_recons.detach().cpu().float().clamp(0., 1.)
+                    grid = make_grid(imgs_and_recons, nrow = 2, normalize = True, value_range = (0, 1))
+
+                    logs['reconstructions'] = grid
+
+                    save_image(grid, str(self.results_folder / f'{filename}.png'))
 
             self.print(f'{steps}: saving to {str(self.results_folder)}')
 
