@@ -501,23 +501,24 @@ class Phenaki(nn.Module):
         assert cond_drop_prob > 0.
         self.cond_drop_prob = cond_drop_prob # classifier free guidance for transformers - @crowsonkb
 
-    def sample_image(
+    def sample_images(
         self,
         *,
-        text,
+        texts: Union[List[str], str] = None,
+        batch_size = 1,
         cond_scale = 3.,
         starting_temperature = 0.9,
         noise_K = 1.
     ):
         single_framed_video = self.sample(
-            text = text,
+            texts = texts,
             num_frames = 1,
             cond_scale = cond_scale,
             starting_temperature = starting_temperature,
             noise_K = noise_K
         )
 
-        return rearrange(single_framed_video, 'b c 1 h w -> b c h w')
+        return rearrange(single_framed_video, '... c 1 h w -> ... c h w')
 
     @eval_decorator
     @torch.no_grad()
@@ -525,8 +526,9 @@ class Phenaki(nn.Module):
         self,
         *,
         num_frames,
-        text = None,
+        texts: Union[List[str], str] = None,
         prime_frames = None,
+        batch_size = 1,
         cond_scale = 3.,
         starting_temperature = 0.9,
         noise_K = 1. # hyperparameter for noising of critic score in section 3.2 of token-critic paper, need to find correct value
@@ -555,10 +557,15 @@ class Phenaki(nn.Module):
 
         text_embeds = text_mask = None
 
-        if exists(text):
+        if exists(texts):
+            if isinstance(texts, str):
+                texts = [texts]
+
             with torch.no_grad():
-                text_embeds = self.encode_texts([text], output_device = device)
+                text_embeds = self.encode_texts(texts, output_device = device)
                 text_mask = torch.any(text_embeds != 0, dim = -1)
+
+            batch_size = len(texts)
 
         # derive video patch shape
 
@@ -736,7 +743,7 @@ def make_video(
     scenes = []
 
     for text, scene_num_frames, next_scene_prime_length in zip(texts, num_frames, prime_lengths):
-        video = phenaki.sample(text = text, prime_frames = video_prime, num_frames = scene_num_frames)
+        video = phenaki.sample(texts = text, prime_frames = video_prime, num_frames = scene_num_frames)
         scenes.append(video)
 
         video_prime = video[:, :, -next_scene_prime_length:]

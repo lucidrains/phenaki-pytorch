@@ -14,7 +14,9 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
 from torch.optim import Adam
-from torchvision import transforms as T, utils
+
+from torchvision import transforms as T
+from torchvision.utils import make_grid, save_image
 
 from einops import rearrange, reduce
 from einops.layers.torch import Rearrange
@@ -120,6 +122,7 @@ class PhenakiTrainer(object):
         dataset_klass = ImageDataset if train_on_images else VideoDataset
 
         self.sample_num_frames = default(sample_num_frames, num_frames)
+        self.train_on_images = train_on_images
 
         if train_on_images:
             self.ds = ImageDataset(folder, self.image_size)
@@ -223,11 +226,27 @@ class PhenakiTrainer(object):
             self.model.eval()
             milestone = self.step // self.save_and_sample_every
 
-            with torch.no_grad():
-                batches = num_to_groups(self.num_samples, self.batch_size)
-                sampled_video = self.model.sample(num_frames = self.sample_num_frames)
+            if not self.train_on_images: # sample videos as gifs
+                with torch.no_grad():
+                    groups = num_to_groups(self.num_samples, self.batch_size)
+                    sampled_videos = [self.model.sample(num_frames = self.sample_num_frames, batch_size = b) for b in groups]
+                    sampled_videos = torch.cat(sampled_videos, dim = 0)
 
-            video_tensor_to_gif(sampled_video[0], str(self.results_folder / f'{milestone}.gif'))
+                for ind, video_tensor in enumerate(sampled_videos.unbind(dim = 0)):
+                    video_tensor_to_gif(video_tensor, str(self.results_folder / f'{ind}.gif'))
+            else:
+                nrows = int(math.sqrt(self.num_samples))
+
+                with torch.no_grad():
+                    groups = num_to_groups(self.num_samples, self.batch_size)
+                    sampled_images = [self.model.sample_images(batch_size = b) for b in groups]
+                    sampled_images = torch.cat(sampled_images, dim = 0)
+
+                sampled_images = sampled_images.detach().cpu().float().clamp(0., 1.)
+                grid = make_grid(sampled_images, nrow = nrows, normalize = True, value_range = (0, 1))
+
+                save_image(grid, str(self.results_folder / f'{milestone}.png'))
+
             self.save(milestone)
 
         self.step += 1

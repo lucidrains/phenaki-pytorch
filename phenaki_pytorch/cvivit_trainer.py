@@ -284,8 +284,6 @@ class CViViTTrainer(nn.Module):
                     for tensor in recons.unbind(dim = 0):
                         video_tensor_to_gif(tensor, str(sampled_videos_path / f'{filename}.gif'))
                 else:
-                    nrows = int(sqrt(self.batch_size))
-
                     imgs_and_recons = torch.stack((valid_data, recons), dim = 0)
                     imgs_and_recons = rearrange(imgs_and_recons, 'r b ... -> (b r) ...')
 

@@ -93,7 +93,7 @@ loss.backward()
 
 # do the above for many steps, then ...
 
-video = phenaki.sample(text = 'a squirrel examines an acorn', num_frames = 17, cond_scale = 5.) # (1, 3, 17, 256, 128)
+video = phenaki.sample(texts = 'a squirrel examines an acorn', num_frames = 17, cond_scale = 5.) # (1, 3, 17, 256, 128)
 
 # so in the paper, they do not really achieve 2 minutes of coherent video
 # at each new scene with new text conditioning, they condition on the previous K frames
@@ -101,7 +101,7 @@ video = phenaki.sample(text = 'a squirrel examines an acorn', num_frames = 17, c
 
 video_prime = video[:, :, -3:] # (1, 3, 3, 256, 128) # say K = 3
 
-video_next = phenaki.sample(text = 'a cat watches the squirrel from afar', prime_frames = video_prime, num_frames = 14) # (1, 3, 14, 256, 128)
+video_next = phenaki.sample(texts = 'a cat watches the squirrel from afar', prime_frames = video_prime, num_frames = 14) # (1, 3, 14, 256, 128)
 
 # the total video
 
