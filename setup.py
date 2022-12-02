@@ -26,6 +26,7 @@ setup(
     'pillow',
     'numpy',
     'torch>=1.6',
+    'torchtyping',
     'torchvision',
     'transformers',
     'tqdm',
