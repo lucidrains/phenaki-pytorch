@@ -130,6 +130,131 @@ entire_video.shape # (1, 3, 17 + 14 + 14 = 45, 256, 256)
 
 That's it!
 
+## Phenaki Trainer (wip)
+
+This repository will also endeavor to allow the researcher to train on text-to-image and then text-to-video. Similarly, for unconditional training, the researcher should be able to first train on images and then fine tune on video. Below is an example for text-to-video
+
+
+```python
+import torch
+from torch.utils.data import Dataset
+from phenaki_pytorch import CViViT, MaskGit, Phenaki, PhenakiTrainer
+
+cvivit = CViViT(
+    dim = 512,
+    codebook_size = 5000,
+    image_size = 256,
+    patch_size = 32,
+    temporal_patch_size = 2,
+    spatial_depth = 4,
+    temporal_depth = 4,
+    dim_head = 64,
+    heads = 8
+)
+
+cvivit.load('/path/to/trained/cvivit.pt')
+
+maskgit = MaskGit(
+    num_tokens = 5000,
+    max_seq_len = 1024,
+    dim = 512,
+    dim_context = 768,
+    depth = 6,
+    unconditional = False
+)
+
+phenaki = Phenaki(
+    cvivit = cvivit,
+    maskgit = maskgit
+).cuda()
+
+# mock text video dataset
+# you will have to extend your own, and return the (<video tensor>, <caption>) tuple
+
+class MockTextVideoDataset(Dataset):
+    def __init__(
+        self,
+        length = 100,
+        image_size = 256,
+        num_frames = 17
+    ):
+        super().__init__()
+        self.num_frames = num_frames
+        self.image_size = image_size
+        self.len = length
+
+    def __len__(self):
+        return self.len
+
+    def __getitem__(self, idx):
+        video = torch.randn(3, self.num_frames, self.image_size, self.image_size)
+        caption = 'video caption'
+        return video, caption
+
+dataset = MockTextVideoDataset()
+
+# pass in the dataset
+
+trainer = PhenakiTrainer(
+    phenaki = phenaki,
+    batch_size = 4,
+    grad_accum_every = 4,
+    train_on_images = False,  # if your mock dataset above return (images, caption) pairs, set this to True
+    dataset = dataset         # pass in your dataset here
+)
+
+trainer.train()
+```
+
+Unconditional is a lot less complicated - But I will keep whittling away at the complexity of text loading
+
+ex. unconditional images and video training
+
+```python
+import torch
+from phenaki_pytorch import CViViT, MaskGit, Phenaki, PhenakiTrainer
+
+cvivit = CViViT(
+    dim = 512,
+    codebook_size = 5000,
+    image_size = 256,
+    patch_size = 32,
+    temporal_patch_size = 2,
+    spatial_depth = 4,
+    temporal_depth = 4,
+    dim_head = 64,
+    heads = 8
+)
+
+cvivit.load('/path/to/trained/cvivit.pt')
+
+maskgit = MaskGit(
+    num_tokens = 5000,
+    max_seq_len = 1024,
+    dim = 512,
+    dim_context = 768,
+    depth = 6,
+    unconditional = False
+)
+
+phenaki = Phenaki(
+    cvivit = cvivit,
+    maskgit = maskgit
+).cuda()
+
+# pass in the folder to images or video
+
+trainer = PhenakiTrainer(
+    phenaki = phenaki,
+    batch_size = 4,
+    grad_accum_every = 4,
+    train_on_images = True,                # for sake of example, bottom is folder of images
+    dataset = '/path/to/images/or/video'
+)
+
+trainer.train()
+```
+
 ## Token Critic
 
 A <a href="https://arxiv.org/abs/2209.04439">new paper</a> suggests that instead of relying on the predicted probabilities of each token as a measure of confidence, one can train an extra critic to decide what to iteratively mask during sampling. You can optionally train this critic for potentially better generations as shown below
