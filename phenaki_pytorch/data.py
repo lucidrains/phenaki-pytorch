@@ -4,11 +4,14 @@ import cv2
 from PIL import Image
 from functools import partial
 
+from typing import Tuple, List
+from beartype.door import is_bearable
+
 import numpy as np
 
 import torch
 import torch.nn.functional as F
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader as PytorchDataLoader
 from torchvision import transforms as T, utils
 
 from einops import rearrange
@@ -236,3 +239,27 @@ class VideoDataset(Dataset):
             raise ValueError(f'unknown extension {ext}')
 
         return self.cast_num_frames_fn(tensor)
+
+# override dataloader to be able to collate strings
+
+def collate_tensors_and_strings(data):
+    if is_bearable(data, List[torch.Tensor]):
+        return (torch.stack(data, dim = 0),)
+
+    data = zip(*data)
+    output = []
+
+    for datum in data:
+        if is_bearable(datum, Tuple[torch.Tensor, ...]):
+            datum = torch.stack(datum, dim = 0)
+        elif is_bearable(datum, Tuple[str, ...]):
+            datum = list(datum)
+        else:
+            raise ValueError('detected invalid type being passed from dataset')
+
+        output.append(datum)
+
+    return tuple(output)
+
+def DataLoader(*args, **kwargs):
+    return PytorchDataLoader(*args, collate_fn = collate_tensors_and_strings, **kwargs)

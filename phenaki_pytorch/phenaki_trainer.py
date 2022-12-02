@@ -11,7 +11,7 @@ from beartype import beartype
 import torch
 from torch import nn, einsum
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 
 from torch.optim import Adam
 
@@ -29,7 +29,7 @@ from accelerate import Accelerator
 
 from phenaki_pytorch.phenaki_pytorch import Phenaki
 
-from phenaki_pytorch.data import ImageDataset, VideoDataset, video_tensor_to_gif
+from phenaki_pytorch.data import ImageDataset, VideoDataset, video_tensor_to_gif, DataLoader
 
 # helpers functions
 
@@ -60,6 +60,14 @@ def num_to_groups(num, divisor):
         arr.append(remainder)
     return arr
 
+def elements_to_device_if_tensor(arr, device):
+    output = []
+    for el in arr:
+        if isinstance(el, torch.Tensor):
+            el = el.to(device)
+        output.append(el)
+    return output
+
 # trainer class
 
 @beartype
@@ -67,8 +75,8 @@ class PhenakiTrainer(object):
     def __init__(
         self,
         phenaki: Phenaki,
-        folder,
         *,
+        folder = None,
         train_on_images = False,
         batch_size = 16,
         grad_accum_every = 1,
@@ -87,13 +95,14 @@ class PhenakiTrainer(object):
         amp = False,
         fp16 = False,
         split_batches = True,
-        convert_image_to = None
+        convert_image_to = None,
+        dataset = None,
+        dataset_fields = ('videos', 'texts', 'video_frame_masks')
     ):
         super().__init__()
         maskgit = phenaki.maskgit
         cvivit = phenaki.cvivit
 
-        assert maskgit.unconditional, 'only unconditional training supported atm'
         assert exists(cvivit)
 
         self.accelerator = Accelerator(
@@ -124,15 +133,21 @@ class PhenakiTrainer(object):
         self.sample_num_frames = default(sample_num_frames, num_frames)
         self.train_on_images = train_on_images
 
-        if train_on_images:
+        if dataset:
+            self.ds = dataset
+        elif train_on_images:
+            assert exists(folder)
             self.ds = ImageDataset(folder, self.image_size)
         else:
+            assert exists(folder)
             self.ds = VideoDataset(folder, self.image_size, num_frames = num_frames)
 
         dl = DataLoader(self.ds, batch_size = batch_size, shuffle = True, pin_memory = True, num_workers = cpu_count())
 
         dl = self.accelerator.prepare(dl)
         self.dl = cycle(dl)
+
+        self.dataset_fields = dataset_fields
 
         # optimizer
 
@@ -203,10 +218,14 @@ class PhenakiTrainer(object):
         total_loss = 0.
 
         for _ in range(self.grad_accum_every):
-            data = next(self.dl).to(device)
+            data = next(self.dl)
+            data = elements_to_device_if_tensor(data, device)
+            data_kwargs = dict(zip(self.dataset_fields, data))
+
+            assert not (self.train_on_images and data_kwargs['videos'].ndim != 4), 'you have it set to train on images, but the dataset is not returning tensors of 4 dimensions (batch, channels, height, width)'
 
             with self.accelerator.autocast():
-                loss = self.model(data)
+                loss = self.model(**data_kwargs)
                 loss = loss / self.grad_accum_every
                 total_loss += loss.item()
 
