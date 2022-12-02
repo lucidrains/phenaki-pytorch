@@ -200,7 +200,12 @@ trainer = PhenakiTrainer(
     batch_size = 4,
     grad_accum_every = 4,
     train_on_images = False,  # if your mock dataset above return (images, caption) pairs, set this to True
-    dataset = dataset         # pass in your dataset here
+    dataset = dataset,        # pass in your dataset here
+    sample_texts = [          # list of captions for sampling
+        'a whale breaching from afar',
+        'young girl blowing out candles on her birthday cake',
+        'fireworks with blue and green sparkles'
+    ]
 )
 
 trainer.train()

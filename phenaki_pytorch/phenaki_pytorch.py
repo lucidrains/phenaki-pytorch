@@ -573,7 +573,7 @@ class Phenaki(nn.Module):
 
         # get video token ids
 
-        shape = (1, num_tokens)
+        shape = (batch_size, num_tokens)
 
         video_token_ids = torch.full(shape, self.mask_id, device = device)
         mask = torch.ones(shape, device = device, dtype = torch.bool)
