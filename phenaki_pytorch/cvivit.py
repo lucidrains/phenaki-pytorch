@@ -179,6 +179,14 @@ class Discriminator(nn.Module):
 
 # c-vivit - 3d ViT with factorized spatial and temporal attention made into an vqgan-vae autoencoder
 
+def pick_video_frame(video, frame_indices):
+    batch, device = video.shape[0], video.device
+    video = rearrange(video, 'b c f ... -> b f c ...')
+    batch_indices = torch.arange(batch, device = device)
+    images = video[batch_indices, frame_indices]
+    images = rearrange(images, 'b 1 c ... -> b c ...')
+    return images
+
 class CViViT(nn.Module):
     def __init__(
         self,
@@ -440,7 +448,7 @@ class CViViT(nn.Module):
             video = rearrange(video, 'b c h w -> b c 1 h w')
             assert not exists(mask)
 
-        b, c, f, *image_dims = video.shape
+        b, c, f, *image_dims, device = *video.shape, video.device
 
         assert tuple(image_dims) == self.image_size
         assert not exists(mask) or mask.shape[-1] == f
@@ -495,15 +503,23 @@ class CViViT(nn.Module):
         else:
             recon_loss = F.mse_loss(video, recon_video)
 
+        # prepare a random frame index to be chosen for discriminator and perceptual loss
+
+        pick_frame_logits = torch.randn(b, f)
+
+        if exists(mask):
+            mask_value = -torch.finfo(pick_frame_logits.dtype).max
+            pick_frame_logits = pick_frame_logits.masked_fill(~mask, mask_value)
+
+        frame_indices = pick_frame_logits.topk(1, dim = -1).indices
+
         # whether to return discriminator loss
 
         if return_discr_loss:
             assert exists(self.discr), 'discriminator must exist to train it'
 
-            # use first frame for now
-
-            video = video[:, :, 0]
-            recon_video = recon_video[:, :, 0]
+            video = pick_video_frame(video, frame_indices)
+            recon_video = pick_video_frame(recon_video, frame_indices)
 
             recon_video = recon_video.detach()
             video.requires_grad_()
@@ -531,10 +547,8 @@ class CViViT(nn.Module):
 
         # perceptual loss
 
-        # use first frame for now - todo, randomly sample or set some maximum frames to help with mem
-
-        input_vgg_input = video[:, :, 0]
-        recon_vgg_input = recon_video[:, :, 0]
+        input_vgg_input = pick_video_frame(video, frame_indices)
+        recon_vgg_input = pick_video_frame(recon_video, frame_indices)
 
         # handle grayscale for vgg
 
