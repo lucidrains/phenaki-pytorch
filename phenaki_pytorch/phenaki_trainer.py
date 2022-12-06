@@ -150,17 +150,16 @@ class PhenakiTrainer(object):
         fp16 = False,
         split_batches = True,
         convert_image_to = None,
+        sample_texts_file_path = None,  # path to a text file with video captions, delimited by newline
         sample_texts: Optional[List[str]] = None,
-        dataset = None,
+        dataset: Optional[Dataset] = None,
         dataset_fields = ('videos', 'texts', 'video_frame_masks')
     ):
         super().__init__()
         maskgit = phenaki.maskgit
         cvivit = phenaki.cvivit
 
-        assert exists(cvivit)
-
-        assert maskgit.unconditional or exists(sample_texts), 'if maskgit is to be trained text conditioned, `sample_texts` List[str] must be given'
+        assert exists(cvivit), 'cvivit must be present on phenaki'
 
         self.accelerator = Accelerator(
             split_batches = split_batches,
@@ -172,9 +171,22 @@ class PhenakiTrainer(object):
         self.model = phenaki
 
         assert has_int_squareroot(num_samples), 'number of samples must have an integer square root'
-        self.num_samples = num_samples
-        self.sample_texts = sample_texts
         self.unconditional = maskgit.unconditional
+
+        self.num_samples = num_samples
+
+        self.sample_texts = None
+
+        if exists(sample_texts_file_path):
+            sample_texts_file_path = Path(sample_texts_file_path)
+            assert sample_texts_file_path.exists()
+            captions = sample_texts_file_path.read_text().split('\n')
+            self.sample_texts = list(filter(len, captions))
+
+        elif exists(self.sample_texts):
+            self.sample_texts = sample_texts
+
+        assert maskgit.unconditional or exists(self.sample_texts), 'if maskgit is to be trained text conditioned, `sample_texts` List[str] must be given'
 
         self.save_and_sample_every = save_and_sample_every
 
