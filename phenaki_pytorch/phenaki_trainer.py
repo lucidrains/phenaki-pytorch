@@ -270,6 +270,11 @@ class PhenakiTrainer(object):
         dl = self.accelerator.prepare(dl)
         self.dl = cycle(dl)
 
+        if exists(dataset_fields):
+            assert not has_duplicates(dataset_fields), 'dataset fields must not have duplicate field names'
+            valid_dataset_fields = set(DATASET_FIELD_TYPE_CONFIG.keys())
+            assert len(set(dataset_fields) - valid_dataset_fields) == 0, f'dataset fields must be one of {valid_dataset_fields}'
+
         self.dataset_fields = dataset_fields
 
         # optimizer
@@ -290,6 +295,7 @@ class PhenakiTrainer(object):
     def data_tuple_to_kwargs(self, data):
         if not exists(self.dataset_fields):
             self.dataset_fields = determine_types(data, DATASET_FIELD_TYPE_CONFIG)
+            assert not has_duplicates(self.dataset_fields), 'dataset fields must not have duplicate field names'
 
         return dict(zip(self.dataset_fields, data))
 
