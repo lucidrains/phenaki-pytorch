@@ -209,7 +209,7 @@ trainer = PhenakiTrainer(
 trainer.train()
 ```
 
-Unconditional is a lot less complicated - But I will keep whittling away at the complexity of text loading
+Unconditional is as follows
 
 ex. unconditional images and video training
 
