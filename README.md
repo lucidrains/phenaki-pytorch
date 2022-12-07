@@ -8,6 +8,16 @@ Please join <a href="https://discord.gg/xBPBXfcFHd"><img alt="Join us on Discord
 
 <a href="https://www.youtube.com/watch?v=RYLomvaPWa4">AI Coffeebreak explanation</a>
 
+## Appreciation
+
+- <a href="https://stability.ai/">Stability.ai</a> for the generous sponsorship to work on cutting edge artificial intelligence research
+
+- <a href="https://huggingface.co/">🤗 Huggingface</a> for their amazing transformers and accelerate library
+
+- <a href="https://github.com/gmegh">Guillem</a> for his ongoing contributions
+
+- You? If you are a great machine learning engineer and / or researcher, feel free to contribute to the frontier of open source generative AI
+
 ## Install
 
 ```bash
@@ -132,6 +142,74 @@ entire_video.shape # (1, 3, 17 + 14 + 14 = 45, 256, 256)
 
 That's it!
 
+## Token Critic
+
+A <a href="https://arxiv.org/abs/2209.04439">new paper</a> suggests that instead of relying on the predicted probabilities of each token as a measure of confidence, one can train an extra critic to decide what to iteratively mask during sampling. You can optionally train this critic for potentially better generations as shown below
+
+```python
+import torch
+from phenaki_pytorch import CViViT, MaskGit, TokenCritic, PhenakiCritic
+
+cvivit = CViViT(
+    dim = 512,
+    codebook_size = 5000,
+    image_size = (256, 128),
+    patch_size = 32,
+    temporal_patch_size = 2,
+    spatial_depth = 4,
+    temporal_depth = 4,
+    dim_head = 64,
+    heads = 8
+)
+
+maskgit = MaskGit(
+    num_tokens = 5000,
+    max_seq_len = 1024,
+    dim = 512,
+    dim_context = 768,
+    depth = 6,
+)
+
+critic = TokenCritic(
+    num_tokens = 5000,
+    max_seq_len = 1024,
+    dim = 512,
+    dim_context = 768,
+    depth = 6
+)
+
+critic_trainer = PhenakiCritic(
+    maskgit = maskgit,
+    critic = critic,
+    cvivit = cvivit
+).cuda()
+
+texts = [
+    'a whale breaching from afar',
+    'young girl blowing out candles on her birthday cake',
+    'fireworks with blue and green sparkles'
+]
+
+videos = torch.randn(3, 3, 3, 256, 128).cuda() # (batch, channels, frames, height, width)
+
+loss = critic_trainer(videos = videos, texts = texts)
+loss.backward()
+```
+
+Then just pass the critic to `Phenaki`
+
+```python
+
+phenaki = Phenaki(
+    cvivit = cvivit,
+    maskgit = maskgit,
+    critic = critic
+).cuda()
+
+```
+
+Now your generations should be greatly improved (but who knows, since this is only a month old research)
+
 ## Phenaki Trainer (wip)
 
 This repository will also endeavor to allow the researcher to train on text-to-image and then text-to-video. Similarly, for unconditional training, the researcher should be able to first train on images and then fine tune on video. Below is an example for text-to-video
@@ -209,6 +287,88 @@ trainer = PhenakiTrainer(
 trainer.train()
 ```
 
+Token critic training is similarly
+
+```python
+import torch
+from torch.utils.data import Dataset
+from phenaki_pytorch import CViViT, MaskGit, Phenaki, PhenakiTrainer
+
+cvivit = CViViT(
+    dim = 512,
+    codebook_size = 5000,
+    image_size = 256,
+    patch_size = 32,
+    temporal_patch_size = 2,
+    spatial_depth = 4,
+    temporal_depth = 4,
+    dim_head = 64,
+    heads = 8
+)
+
+cvivit.load('/path/to/trained/cvivit.pt')
+
+maskgit = MaskGit(
+    num_tokens = 5000,
+    max_seq_len = 1024,
+    dim = 512,
+    dim_context = 768,
+    depth = 6,
+    unconditional = False
+)
+
+critic = TokenCritic(
+    num_tokens = 5000,
+    max_seq_len = 1024,
+    dim = 512,
+    dim_context = 768,
+    depth = 6
+)
+
+phenaki_critic = PhenakiCritic(
+    maskgit = maskgit,
+    critic = critic,
+    cvivit = cvivit
+).cuda()
+
+# mock text video dataset
+# you will have to extend your own, and return the (<video tensor>, <caption>) tuple
+
+class MockTextVideoDataset(Dataset):
+    def __init__(
+        self,
+        length = 100,
+        image_size = 256,
+        num_frames = 17
+    ):
+        super().__init__()
+        self.num_frames = num_frames
+        self.image_size = image_size
+        self.len = length
+
+    def __len__(self):
+        return self.len
+
+    def __getitem__(self, idx):
+        video = torch.randn(3, self.num_frames, self.image_size, self.image_size)
+        caption = 'video caption'
+        return video, caption
+
+dataset = MockTextVideoDataset()
+
+# pass in the dataset
+
+trainer = PhenakiCriticTrainer(
+    phenaki_critic = phenaki_critic,
+    batch_size = 4,
+    grad_accum_every = 4,
+    train_on_images = False, # if your mock dataset above return (images, caption) pairs, set this to True
+    dataset = dataset        # pass in your dataset here
+)
+
+trainer.train()
+```
+
 Unconditional is as follows
 
 ex. unconditional images and video training
@@ -258,84 +418,6 @@ trainer = PhenakiTrainer(
 trainer.train()
 ```
 
-## Token Critic
-
-A <a href="https://arxiv.org/abs/2209.04439">new paper</a> suggests that instead of relying on the predicted probabilities of each token as a measure of confidence, one can train an extra critic to decide what to iteratively mask during sampling. You can optionally train this critic for potentially better generations as shown below
-
-```python
-import torch
-from phenaki_pytorch import CViViT, MaskGit, TokenCritic, PhenakiCritic
-
-cvivit = CViViT(
-    dim = 512,
-    codebook_size = 5000,
-    image_size = (256, 128),
-    patch_size = 32,
-    temporal_patch_size = 2,
-    spatial_depth = 4,
-    temporal_depth = 4,
-    dim_head = 64,
-    heads = 8
-)
-
-maskgit = MaskGit(
-    num_tokens = 5000,
-    max_seq_len = 1024,
-    dim = 512,
-    dim_context = 768,
-    depth = 6,
-)
-
-critic = TokenCritic(
-    num_tokens = 5000,
-    max_seq_len = 1024,
-    dim = 512,
-    dim_context = 768,
-    depth = 6
-)
-
-critic_trainer = PhenakiCritic(
-    maskgit = maskgit,
-    critic = critic,
-    cvivit = cvivit
-).cuda()
-
-texts = [
-    'a whale breaching from afar',
-    'young girl blowing out candles on her birthday cake',
-    'fireworks with blue and green sparkles'
-]
-
-videos = torch.randn(3, 3, 3, 256, 128).cuda() # (batch, channels, frames, height, width)
-
-loss = critic_trainer(videos = videos, texts = texts)
-loss.backward()
-```
-
-Then just pass the critic to `Phenaki`
-
-```python
-
-phenaki = Phenaki(
-    cvivit = cvivit,
-    maskgit = maskgit,
-    critic = critic
-).cuda()
-
-```
-
-Now your generations should be greatly improved (but who knows, since this is only a month old research)
-
-## Appreciation
-
-- <a href="https://stability.ai/">Stability.ai</a> for the generous sponsorship to work on cutting edge artificial intelligence research
-
-- <a href="https://huggingface.co/">🤗 Huggingface</a> for their amazing transformers and accelerate library
-
-- <a href="https://github.com/gmegh">Guillem</a> for his ongoing contributions
-
-- You? If you are a great machine learning engineer and / or researcher, feel free to contribute to the frontier of open source generative AI
-
 ## Todo
 
 - [x] pass mask probability into maskgit and auto-mask and get cross entropy loss
@@ -358,7 +440,9 @@ Now your generations should be greatly improved (but who knows, since this is on
 - [x] wire up accelerate for multi-gpu training for both c-vivit and maskgit
 - [x] add depthwise-convs to cvivit for position generating
 - [x] some basic video manipulation code, allow for sampled tensor to be saved as gif
+- [x] basic critic training code
 
+- [ ] get some basic critic sampling code, show comparison of with and without critic
 - [ ] add position generating dsconv to maskgit too
 - [ ] add all top of the line research for stabilizing transformers training
 - [ ] bring in concatenative token shift (temporal dimension)
