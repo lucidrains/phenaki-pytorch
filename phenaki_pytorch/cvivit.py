@@ -98,6 +98,24 @@ def grad_layer_wrt_loss(loss, layer):
         retain_graph = True
     )[0].detach()
 
+# PEG - position generating module
+
+class PEG(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.dsconv = nn.Conv3d(dim, dim, 3, groups = dim)
+
+    def forward(self, x):
+        x = rearrange(x, 'b ... d -> b d ...')
+        res = x.clone() # residual
+
+        x = F.pad(x, (1, 1, 1, 1, 2, 0), value = 0.)
+        x = self.dsconv(x)
+
+        out = x + res
+        out = rearrange(out, 'b d ... -> b ... d')
+        return out
+
 # discriminator
 
 class DiscriminatorBlock(nn.Module):
@@ -239,10 +257,14 @@ class CViViT(nn.Module):
             nn.Linear(channels * patch_width * patch_height * temporal_patch_size, dim)
         )
 
+        self.enc_peg = PEG(dim = dim)
+
         self.enc_spatial_transformer = Transformer(dim = dim, depth = spatial_depth, dim_head = dim_head, heads = heads)
         self.enc_temporal_transformer = Transformer(dim = dim, depth = temporal_depth, dim_head = dim_head, heads = heads, causal = True)
 
         self.vq = VectorQuantize(dim = dim, codebook_size = codebook_size, use_cosine_sim = True)
+
+        self.dec_peg = PEG(dim = dim)
 
         self.dec_spatial_transformer = Transformer(dim = dim, depth = spatial_depth, dim_head = dim_head, heads = heads)
         self.dec_temporal_transformer = Transformer(dim = dim, depth = temporal_depth, dim_head = dim_head, heads = heads, causal = True)
@@ -372,6 +394,8 @@ class CViViT(nn.Module):
         b = tokens.shape[0]
         h, w = self.patch_height_width
 
+        tokens = self.enc_peg(tokens)
+
         tokens = rearrange(tokens, 'b t h w d -> (b t) (h w) d')
 
         attn_bias = self.spatial_rel_pos_bias(h, w, device = tokens.device)
@@ -399,6 +423,8 @@ class CViViT(nn.Module):
 
         if tokens.ndim == 3:
             tokens = rearrange(tokens, 'b (t h w) d -> b t h w d', h = h, w = w)
+
+        tokens = self.dec_peg(tokens)
 
         # decode - temporal
 
