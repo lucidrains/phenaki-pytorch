@@ -306,7 +306,7 @@ class TokenCritic(nn.Module):
         return self.to_logits(x)
 
 @beartype
-class CriticTrainer(nn.Module):
+class PhenakiCritic(nn.Module):
     def __init__(
         self,
         *,

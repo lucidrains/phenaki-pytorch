@@ -264,7 +264,7 @@ A <a href="https://arxiv.org/abs/2209.04439">new paper</a> suggests that instead
 
 ```python
 import torch
-from phenaki_pytorch import CViViT, MaskGit, TokenCritic, CriticTrainer
+from phenaki_pytorch import CViViT, MaskGit, TokenCritic, PhenakiCritic
 
 cvivit = CViViT(
     dim = 512,
@@ -294,7 +294,7 @@ critic = TokenCritic(
     depth = 6
 )
 
-critic_trainer = CriticTrainer(
+critic_trainer = PhenakiCritic(
     maskgit = maskgit,
     critic = critic,
     cvivit = cvivit
