@@ -210,7 +210,7 @@ phenaki = Phenaki(
 
 Now your generations should be greatly improved (but who knows, since this is only a month old research)
 
-## Phenaki Trainer (wip)
+## Phenaki Trainer
 
 This repository will also endeavor to allow the researcher to train on text-to-image and then text-to-video. Similarly, for unconditional training, the researcher should be able to first train on images and then fine tune on video. Below is an example for text-to-video
 
