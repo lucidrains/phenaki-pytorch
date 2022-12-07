@@ -3,6 +3,9 @@ import torch
 import torch.nn.functional as F
 from torch import nn, einsum
 
+from beartype import beartype
+from typing import Tuple
+
 from einops import rearrange, repeat
 
 # helpers
@@ -31,6 +34,38 @@ def FeedForward(dim, mult = 4):
         GEGLU(),
         nn.Linear(inner_dim, dim, bias = False)
     )
+
+# PEG - position generating module
+
+class PEG(nn.Module):
+    def __init__(self, dim, causal = False):
+        super().__init__()
+        self.causal = causal
+        self.dsconv = nn.Conv3d(dim, dim, 3, groups = dim)
+
+    @beartype
+    def forward(self, x, shape: Tuple[int, int, int, int] = None):
+        needs_shape = x.ndim == 3
+        assert not (needs_shape and not exists(shape))
+
+        orig_shape = x.shape
+
+        if needs_shape:
+            x = x.reshape(*shape, -1)
+
+        x = rearrange(x, 'b ... d -> b d ...')
+
+        frame_padding = (2, 0) if self.causal else (1, 1)
+
+        x = F.pad(x, (1, 1, 1, 1, *frame_padding), value = 0.)
+        x = self.dsconv(x)
+
+        x = rearrange(x, 'b d ... -> b ... d')
+
+        if needs_shape:
+            x = rearrange(x, 'b ... d -> b (...) d')
+
+        return x.reshape(orig_shape)
 
 # attention
 
@@ -224,6 +259,8 @@ class Transformer(nn.Module):
         dim_head = 64,
         heads = 8,
         ff_mult = 4,
+        peg = False,
+        peg_causal = False,
         attn_num_null_kv = 2,
         has_cross_attn = False
     ):
@@ -232,6 +269,7 @@ class Transformer(nn.Module):
 
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
+                PEG(dim = dim, causal = peg_causal) if peg else None,
                 Attention(dim = dim, dim_head = dim_head, heads = heads, causal = causal),
                 Attention(dim = dim, dim_head = dim_head, dim_context = dim_context, heads = heads, causal = False, num_null_kv = attn_num_null_kv) if has_cross_attn else None,
                 FeedForward(dim = dim, mult = ff_mult)
@@ -239,16 +277,21 @@ class Transformer(nn.Module):
 
         self.norm_out = nn.LayerNorm(dim)
 
+    @beartype
     def forward(
         self,
         x,
+        video_shape: Tuple[int, int, int, int] = None,
         attn_bias = None,
         context = None,
         self_attn_mask = None,
         cross_attn_context_mask = None
     ):
 
-        for self_attn, cross_attn, ff in self.layers:
+        for peg, self_attn, cross_attn, ff in self.layers:
+            if exists(peg):
+                x = peg(x, shape = video_shape) + x
+
             x = self_attn(x, attn_bias = attn_bias, mask = self_attn_mask) + x
 
             if exists(cross_attn) and exists(context):

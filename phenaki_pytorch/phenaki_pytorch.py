@@ -130,6 +130,7 @@ class MaskGit(nn.Module):
             has_cross_attn = not self.unconditional,
             dim_head = dim_head,
             heads = heads,
+            peg = True,
             **kwargs
         )
 
@@ -177,6 +178,8 @@ class MaskGit(nn.Module):
             keep_mask = prob_mask_like((b,), 1 - cond_drop_prob, device = device)
             text_mask = rearrange(keep_mask, 'b -> b 1') & text_mask
 
+        video_shape = (b, *video_patch_shape)
+
         x = self.token_emb(x)
         x = self.pos_emb(torch.arange(n, device = device)) + x
 
@@ -184,6 +187,7 @@ class MaskGit(nn.Module):
 
         x = self.transformer(
             x,
+            video_shape = video_shape,
             attn_bias = rel_pos_bias,
             self_attn_mask = video_mask,
             cross_attn_context_mask = text_mask,
@@ -251,6 +255,7 @@ class TokenCritic(nn.Module):
 
         self.transformer = Transformer(
             dim = dim,
+            peg = True,
             has_cross_attn = has_cross_attn,
             **kwargs
         )
@@ -282,6 +287,8 @@ class TokenCritic(nn.Module):
         context = None,
         **kwargs
     ):
+        video_shape = x.shape
+
         x = rearrange(x, 'b ... -> b (...)')
         b, n, device = *x.shape, x.device
 
@@ -297,6 +304,7 @@ class TokenCritic(nn.Module):
 
         x = self.transformer(
             x,
+            video_shape = video_shape,
             context = context,
             cross_attn_context_mask = text_mask,
             **kwargs

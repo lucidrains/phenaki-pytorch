@@ -441,9 +441,9 @@ trainer.train()
 - [x] add depthwise-convs to cvivit for position generating
 - [x] some basic video manipulation code, allow for sampled tensor to be saved as gif
 - [x] basic critic training code
+- [x] add position generating dsconv to maskgit too
 
 - [ ] get some basic critic sampling code, show comparison of with and without critic
-- [ ] add position generating dsconv to maskgit too
 - [ ] add all top of the line research for stabilizing transformers training
 - [ ] bring in concatenative token shift (temporal dimension)
 - [ ] add a DDPM upsampler, either port from imagen-pytorch or just rewrite a simple version here
@@ -452,7 +452,6 @@ trainer.train()
 - [ ] test maskgit + critic alone on oxford flowers dataset
 - [ ] support rectangular sized videos
 - [ ] add flash attention as an option for all transformers and cite @tridao
-- [ ] abstract out text conditioning module into own package, and take care of audiolm-pytorch at the same time
 
 ## Citations
 

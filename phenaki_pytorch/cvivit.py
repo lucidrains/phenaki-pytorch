@@ -98,24 +98,6 @@ def grad_layer_wrt_loss(loss, layer):
         retain_graph = True
     )[0].detach()
 
-# PEG - position generating module
-
-class PEG(nn.Module):
-    def __init__(self, dim):
-        super().__init__()
-        self.dsconv = nn.Conv3d(dim, dim, 3, groups = dim)
-
-    def forward(self, x):
-        x = rearrange(x, 'b ... d -> b d ...')
-        res = x.clone() # residual
-
-        x = F.pad(x, (1, 1, 1, 1, 2, 0), value = 0.)
-        x = self.dsconv(x)
-
-        out = x + res
-        out = rearrange(out, 'b d ... -> b ... d')
-        return out
-
 # discriminator
 
 class DiscriminatorBlock(nn.Module):
@@ -245,7 +227,8 @@ class CViViT(nn.Module):
 
         self.spatial_rel_pos_bias = ContinuousPositionBias(dim = dim, heads = heads)
 
-        assert (self.image_size[0] % patch_height) == 0 and (self.image_size[1] % patch_width) == 0
+        image_height, image_width = self.image_size
+        assert (image_height % patch_height) == 0 and (image_width % patch_width) == 0
 
         self.to_patch_emb_first_frame = nn.Sequential(
             Rearrange('b c 1 (h p1) (w p2) -> b 1 h w (c p1 p2)', p1 = patch_height, p2 = patch_width),
@@ -257,17 +240,13 @@ class CViViT(nn.Module):
             nn.Linear(channels * patch_width * patch_height * temporal_patch_size, dim)
         )
 
-        self.enc_peg = PEG(dim = dim)
-
-        self.enc_spatial_transformer = Transformer(dim = dim, depth = spatial_depth, dim_head = dim_head, heads = heads)
-        self.enc_temporal_transformer = Transformer(dim = dim, depth = temporal_depth, dim_head = dim_head, heads = heads, causal = True)
+        self.enc_spatial_transformer = Transformer(dim = dim, depth = spatial_depth, dim_head = dim_head, heads = heads, peg = True, peg_causal = True)
+        self.enc_temporal_transformer = Transformer(dim = dim, depth = temporal_depth, dim_head = dim_head, heads = heads, causal = True, peg = True, peg_causal = True)
 
         self.vq = VectorQuantize(dim = dim, codebook_size = codebook_size, use_cosine_sim = True)
 
-        self.dec_peg = PEG(dim = dim)
-
-        self.dec_spatial_transformer = Transformer(dim = dim, depth = spatial_depth, dim_head = dim_head, heads = heads)
-        self.dec_temporal_transformer = Transformer(dim = dim, depth = temporal_depth, dim_head = dim_head, heads = heads, causal = True)
+        self.dec_spatial_transformer = Transformer(dim = dim, depth = spatial_depth, dim_head = dim_head, heads = heads, peg = True, peg_causal = True)
+        self.dec_temporal_transformer = Transformer(dim = dim, depth = temporal_depth, dim_head = dim_head, heads = heads, causal = True, peg = True, peg_causal = True)
 
         self.to_pixels_first_frame = nn.Sequential(
             nn.Linear(dim, channels * patch_width * patch_height),
@@ -394,13 +373,13 @@ class CViViT(nn.Module):
         b = tokens.shape[0]
         h, w = self.patch_height_width
 
-        tokens = self.enc_peg(tokens)
+        video_shape = tuple(tokens.shape[:-1])
 
         tokens = rearrange(tokens, 'b t h w d -> (b t) (h w) d')
 
         attn_bias = self.spatial_rel_pos_bias(h, w, device = tokens.device)
 
-        tokens = self.enc_spatial_transformer(tokens, attn_bias = attn_bias)
+        tokens = self.enc_spatial_transformer(tokens, attn_bias = attn_bias, video_shape = video_shape)
 
         tokens = rearrange(tokens, '(b t) (h w) d -> b t h w d', b = b, h = h , w = w)
 
@@ -408,7 +387,7 @@ class CViViT(nn.Module):
 
         tokens = rearrange(tokens, 'b t h w d -> (b h w) t d')
 
-        tokens = self.enc_temporal_transformer(tokens)
+        tokens = self.enc_temporal_transformer(tokens, video_shape = video_shape)
 
         tokens = rearrange(tokens, '(b h w) t d -> b t h w d', b = b, h = h, w = w)
 
@@ -424,13 +403,13 @@ class CViViT(nn.Module):
         if tokens.ndim == 3:
             tokens = rearrange(tokens, 'b (t h w) d -> b t h w d', h = h, w = w)
 
-        tokens = self.dec_peg(tokens)
+        video_shape = tuple(tokens.shape[:-1])
 
         # decode - temporal
 
         tokens = rearrange(tokens, 'b t h w d -> (b h w) t d')
 
-        tokens = self.dec_temporal_transformer(tokens)
+        tokens = self.dec_temporal_transformer(tokens, video_shape = video_shape)
 
         tokens = rearrange(tokens, '(b h w) t d -> b t h w d', b = b, h = h, w = w)
 
@@ -440,7 +419,7 @@ class CViViT(nn.Module):
 
         attn_bias = self.spatial_rel_pos_bias(h, w, device = tokens.device)
 
-        tokens = self.dec_spatial_transformer(tokens, attn_bias = attn_bias)
+        tokens = self.dec_spatial_transformer(tokens, attn_bias = attn_bias, video_shape = video_shape)
 
         tokens = rearrange(tokens, '(b t) (h w) d -> b t h w d', b = b, h = h , w = w)
 
