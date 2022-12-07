@@ -205,7 +205,9 @@ class CViViT(nn.Module):
         use_vgg_and_gan = True,
         vgg = None,
         discr_layers = 4,
-        use_hinge_loss = True
+        use_hinge_loss = True,
+        attn_dropout = 0.,
+        ff_dropout = 0.
     ):
         """
         einstein notations:
@@ -240,13 +242,23 @@ class CViViT(nn.Module):
             nn.Linear(channels * patch_width * patch_height * temporal_patch_size, dim)
         )
 
-        self.enc_spatial_transformer = Transformer(dim = dim, depth = spatial_depth, dim_head = dim_head, heads = heads, peg = True, peg_causal = True)
-        self.enc_temporal_transformer = Transformer(dim = dim, depth = temporal_depth, dim_head = dim_head, heads = heads, causal = True, peg = True, peg_causal = True)
+        transformer_kwargs = dict(
+            dim = dim,
+            dim_head = dim_head,
+            heads = heads,
+            attn_dropout = attn_dropout,
+            ff_dropout = ff_dropout,
+            peg = True,
+            peg_causal = True,
+        )
+
+        self.enc_spatial_transformer = Transformer(depth = spatial_depth, **transformer_kwargs)
+        self.enc_temporal_transformer = Transformer(depth = temporal_depth, **transformer_kwargs)
 
         self.vq = VectorQuantize(dim = dim, codebook_size = codebook_size, use_cosine_sim = True)
 
-        self.dec_spatial_transformer = Transformer(dim = dim, depth = spatial_depth, dim_head = dim_head, heads = heads, peg = True, peg_causal = True)
-        self.dec_temporal_transformer = Transformer(dim = dim, depth = temporal_depth, dim_head = dim_head, heads = heads, causal = True, peg = True, peg_causal = True)
+        self.dec_spatial_transformer = Transformer(depth = spatial_depth, **transformer_kwargs)
+        self.dec_temporal_transformer = Transformer(depth = temporal_depth, **transformer_kwargs)
 
         self.to_pixels_first_frame = nn.Sequential(
             nn.Linear(dim, channels * patch_width * patch_height),

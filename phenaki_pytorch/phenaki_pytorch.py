@@ -111,6 +111,8 @@ class MaskGit(nn.Module):
         heads = 8,
         dim_head = 64,
         unconditional = False,
+        attn_dropout = 0.,
+        ff_dropout = 0.,
         **kwargs
     ):
         super().__init__()
@@ -130,6 +132,8 @@ class MaskGit(nn.Module):
             has_cross_attn = not self.unconditional,
             dim_head = dim_head,
             heads = heads,
+            attn_dropout = attn_dropout,
+            ff_dropout = ff_dropout,
             peg = True,
             **kwargs
         )
@@ -243,6 +247,8 @@ class TokenCritic(nn.Module):
         num_tokens,
         max_seq_len,
         has_cross_attn = False,
+        attn_dropout = 0.,
+        ff_dropout = 0.,
         **kwargs
     ):
         super().__init__()
@@ -256,6 +262,8 @@ class TokenCritic(nn.Module):
         self.transformer = Transformer(
             dim = dim,
             peg = True,
+            attn_dropout = attn_dropout,
+            ff_dropout = ff_dropout,
             has_cross_attn = has_cross_attn,
             **kwargs
         )

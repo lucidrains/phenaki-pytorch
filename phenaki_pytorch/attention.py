@@ -26,12 +26,13 @@ class GEGLU(nn.Module):
         x, gate = x.chunk(2, dim = -1)
         return F.gelu(gate) * x
 
-def FeedForward(dim, mult = 4):
+def FeedForward(dim, mult = 4, dropout = 0.):
     inner_dim = int(mult * (2 / 3) * dim)
     return nn.Sequential(
         nn.LayerNorm(dim),
         nn.Linear(dim, inner_dim * 2, bias = False),
         GEGLU(),
+        nn.Dropout(dropout),
         nn.Linear(inner_dim, dim, bias = False)
     )
 
@@ -78,7 +79,8 @@ class Attention(nn.Module):
         heads = 8,
         causal = False,
         num_null_kv = 0,
-        norm_context = True
+        norm_context = True,
+        dropout = 0.
     ):
         super().__init__()
         self.heads = heads
@@ -90,6 +92,8 @@ class Attention(nn.Module):
         if causal:
             self.rel_pos_bias = AlibiPositionalBias(heads = heads)
 
+        self.attn_dropout = nn.Dropout(dropout)
+
         self.norm = nn.LayerNorm(dim)
         self.context_norm = nn.LayerNorm(dim_context) if norm_context else nn.Identity()
 
@@ -98,6 +102,7 @@ class Attention(nn.Module):
 
         self.to_q = nn.Linear(dim, inner_dim, bias = False)
         self.to_kv = nn.Linear(dim_context, inner_dim * 2, bias = False)
+
         self.to_out = nn.Linear(inner_dim, dim, bias = False)
 
     def forward(
@@ -147,6 +152,7 @@ class Attention(nn.Module):
             sim = sim.masked_fill(causal_mask, -torch.finfo(sim.dtype).max)
 
         attn = sim.softmax(dim = -1)
+        attn = self.attn_dropout(attn)
 
         out = einsum('b h i j, b h j d -> b h i d', attn, v)
 
@@ -262,7 +268,9 @@ class Transformer(nn.Module):
         peg = False,
         peg_causal = False,
         attn_num_null_kv = 2,
-        has_cross_attn = False
+        has_cross_attn = False,
+        attn_dropout = 0.,
+        ff_dropout = 0.
     ):
         super().__init__()
         self.layers = nn.ModuleList([])
@@ -270,9 +278,9 @@ class Transformer(nn.Module):
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
                 PEG(dim = dim, causal = peg_causal) if peg else None,
-                Attention(dim = dim, dim_head = dim_head, heads = heads, causal = causal),
-                Attention(dim = dim, dim_head = dim_head, dim_context = dim_context, heads = heads, causal = False, num_null_kv = attn_num_null_kv) if has_cross_attn else None,
-                FeedForward(dim = dim, mult = ff_mult)
+                Attention(dim = dim, dim_head = dim_head, heads = heads, causal = causal, dropout = attn_dropout),
+                Attention(dim = dim, dim_head = dim_head, dim_context = dim_context, heads = heads, causal = False, num_null_kv = attn_num_null_kv, dropout = attn_dropout) if has_cross_attn else None,
+                FeedForward(dim = dim, mult = ff_mult, dropout = ff_dropout)
             ]))
 
         self.norm_out = nn.LayerNorm(dim)
