@@ -355,10 +355,11 @@ Now your generations should be greatly improved (but who knows, since this is on
 - [x] training code for cvivit
 - [x] move cvivit into own file
 - [x] unconditional generations (both video and images)
+- [x] wire up accelerate for multi-gpu training for both c-vivit and maskgit
+- [x] add depthwise-convs to cvivit for position generating
+- [x] some basic video manipulation code, allow for sampled tensor to be saved as gif
 
-- [ ] add depthwise-convs to cvivit for position generating
-- [ ] wire up accelerate for multi-gpu training for both c-vivit and maskgit
-- [ ] some basic video manipulation code, allow for sampled tensor to be saved as gif
+- [ ] add position generating dsconv to maskgit too
 - [ ] add all top of the line research for stabilizing transformers training
 - [ ] bring in concatenative token shift (temporal dimension)
 - [ ] add a DDPM upsampler, either port from imagen-pytorch or just rewrite a simple version here
