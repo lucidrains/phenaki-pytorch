@@ -442,12 +442,12 @@ trainer.train()
 - [x] some basic video manipulation code, allow for sampled tensor to be saved as gif
 - [x] basic critic training code
 - [x] add position generating dsconv to maskgit too
+- [x] outfit customizable self attention blocks to stylegan discriminator
 
 - [ ] get some basic critic sampling code, show comparison of with and without critic
 - [ ] add all top of the line research for stabilizing transformers training
 - [ ] bring in concatenative token shift (temporal dimension)
 - [ ] add a DDPM upsampler, either port from imagen-pytorch or just rewrite a simple version here
-- [ ] outfit customizable self attention blocks to stylegan discriminator
 - [ ] take care of masking in maskgit
 - [ ] test maskgit + critic alone on oxford flowers dataset
 - [ ] support rectangular sized videos

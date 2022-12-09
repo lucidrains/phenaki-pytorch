@@ -52,6 +52,9 @@ def pair(val):
     assert len(ret) == 2
     return ret
 
+def cast_tuple(val, l = 1):
+    return val if isinstance(val, tuple) else (val,) * l
+
 def gradient_penalty(images, output, weight = 10):
     batch_size = images.shape[0]
 
@@ -139,11 +142,14 @@ class Discriminator(nn.Module):
         dim,
         image_size,
         channels = 3,
-        attn_layers = [],
+        attn_layers = None,
         max_dim = 512
     ):
         super().__init__()
-        num_layers = int(math.log2(min(image_size)) - 1)
+        num_layers = int(math.log2(min(pair(image_size))) - 1)
+        attn_layers = cast_tuple(attn_layers, num_layers)
+        assert len(attn_layers) == num_layers
+
         blocks = []
 
         layer_dims = [channels] + [(dim * 4) * (2 ** i) for i in range(num_layers + 1)]
@@ -151,15 +157,23 @@ class Discriminator(nn.Module):
         layer_dims_in_out = tuple(zip(layer_dims[:-1], layer_dims[1:]))
 
         blocks = []
+        attn_blocks = []
 
-        for ind, (in_chan, out_chan) in enumerate(layer_dims_in_out):
+        for ind, ((in_chan, out_chan), layer_has_attn) in enumerate(zip(layer_dims_in_out, attn_layers)):
             num_layer = ind + 1
             is_not_last = ind != (len(layer_dims_in_out) - 1)
 
             block = DiscriminatorBlock(in_chan, out_chan, downsample = is_not_last)
             blocks.append(block)
 
+            attn_block = None
+            if layer_has_attn:
+                attn_block = Attention(dim = out_chan)
+
+            attn_blocks.append(attn_block)
+
         self.blocks = nn.ModuleList(blocks)
+        self.attn_blocks = nn.ModuleList(attn_blocks)
 
         dim_last = layer_dims[-1]
         latent_dim = 2 * 2 * dim_last
@@ -172,8 +186,15 @@ class Discriminator(nn.Module):
         )
 
     def forward(self, x):
-        for block in self.blocks:
+        for block, attn_block in zip(self.blocks, self.attn_blocks):
             x = block(x)
+
+            if exists(attn_block):
+                x, ps = pack([x], 'b c *')
+                x = rearrange(x, 'b c n -> b n c')
+                x = attn_block(x) + x
+                x = rearrange(x, 'b n c -> b c n')
+                x, = unpack(x, ps, 'b c *')
 
         return self.to_logits(x)
 
@@ -204,7 +225,7 @@ class CViViT(nn.Module):
         channels = 3,
         use_vgg_and_gan = True,
         vgg = None,
-        discr_layers = 4,
+        discr_attn_layers = None,
         use_hinge_loss = True,
         attn_dropout = 0.,
         ff_dropout = 0.
@@ -289,11 +310,12 @@ class CViViT(nn.Module):
 
         # gan related losses
 
-        layer_mults = list(map(lambda t: 2 ** t, range(discr_layers)))
-        layer_dims = [dim * mult for mult in layer_mults]
-        dims = (dim, *layer_dims)
-
-        self.discr = Discriminator(dim = discr_base_dim, channels = channels, image_size = self.image_size)
+        self.discr = Discriminator(
+            image_size = self.image_size,
+            dim = discr_base_dim,
+            channels = channels,
+            attn_layers = discr_attn_layers
+        )
 
         self.discr_loss = hinge_discr_loss if use_hinge_loss else bce_discr_loss
         self.gen_loss = hinge_gen_loss if use_hinge_loss else bce_gen_loss
