@@ -147,7 +147,10 @@ class Discriminator(nn.Module):
         max_dim = 512
     ):
         super().__init__()
-        num_layers = int(math.log2(min(pair(image_size))) - 2)
+        image_size = pair(image_size)
+        min_image_resolution = min(image_size)
+
+        num_layers = int(math.log2(min_image_resolution) - 2)
         attn_res_layers = cast_tuple(attn_res_layers, num_layers)
 
         blocks = []
@@ -159,7 +162,7 @@ class Discriminator(nn.Module):
         blocks = []
         attn_blocks = []
 
-        image_resolution = image_size
+        image_resolution = min_image_resolution
 
         for ind, (in_chan, out_chan) in enumerate(layer_dims_in_out):
             num_layer = ind + 1
@@ -180,7 +183,11 @@ class Discriminator(nn.Module):
         self.attn_blocks = nn.ModuleList(attn_blocks)
 
         dim_last = layer_dims[-1]
-        latent_dim = 4 * 4 * dim_last
+
+        downsample_factor = 2 ** num_layers
+        last_fmap_size = tuple(map(lambda n: n // downsample_factor, image_size))
+
+        latent_dim = last_fmap_size[0] * last_fmap_size[1] * dim_last
 
         self.to_logits = nn.Sequential(
             nn.Conv2d(dim_last, dim_last, 3, padding = 1),

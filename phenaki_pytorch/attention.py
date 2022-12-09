@@ -19,6 +19,18 @@ def default(val, d):
 def leaky_relu(p = 0.1):
     return nn.LeakyReLU(p)
 
+# bias-less layernorm, being used in more recent T5s, PaLM, also in @borisdayma 's experiments shared with me
+# greater stability
+
+class LayerNorm(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.gamma = nn.Parameter(torch.ones(dim))
+        self.register_buffer("beta", torch.zeros(dim))
+
+    def forward(self, x):
+        return F.layer_norm(x, x.shape[-1:], self.gamma, self.beta)
+
 # feedforward
 
 class GEGLU(nn.Module):
@@ -94,8 +106,8 @@ class Attention(nn.Module):
 
         self.attn_dropout = nn.Dropout(dropout)
 
-        self.norm = nn.LayerNorm(dim)
-        self.context_norm = nn.LayerNorm(dim_context) if norm_context else nn.Identity()
+        self.norm = LayerNorm(dim)
+        self.context_norm = LayerNorm(dim_context) if norm_context else nn.Identity()
 
         self.num_null_kv = num_null_kv
         self.null_kv = nn.Parameter(torch.randn(heads, 2 * num_null_kv, dim_head))
@@ -283,7 +295,7 @@ class Transformer(nn.Module):
                 FeedForward(dim = dim, mult = ff_mult, dropout = ff_dropout)
             ]))
 
-        self.norm_out = nn.LayerNorm(dim)
+        self.norm_out = LayerNorm(dim)
 
     @beartype
     def forward(
