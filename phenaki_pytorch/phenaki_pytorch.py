@@ -120,6 +120,8 @@ class MaskGit(nn.Module):
         self.unconditional = unconditional
 
         self.token_emb = nn.Embedding(num_tokens + 1, dim) # last token is used as mask_id
+
+        self.max_seq_len = max_seq_len
         self.pos_emb = nn.Embedding(max_seq_len, dim)
 
         self.gradient_shrink_alpha = gradient_shrink_alpha  # used with great success in cogview and GLM 130B attention net
@@ -185,6 +187,8 @@ class MaskGit(nn.Module):
         video_shape = (b, *video_patch_shape)
 
         x = self.token_emb(x)
+
+        assert n <= self.max_seq_len, f'the video token sequence length you are passing in ({n}) is greater than the `max_seq_len` ({self.max_seq_len}) set on your `MaskGit`'
         x = self.pos_emb(torch.arange(n, device = device)) + x
 
         x = x * self.gradient_shrink_alpha + x.detach() * (1 - self.gradient_shrink_alpha)
