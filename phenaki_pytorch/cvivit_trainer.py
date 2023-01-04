@@ -174,6 +174,28 @@ class CViViTTrainer(nn.Module):
 
         self.results_folder.mkdir(parents = True, exist_ok = True)
 
+    def save(self, path):
+        if not self.accelerator.is_local_main_process:
+            return
+
+        pkg = dict(
+            model = self.accelerator.get_state_dict(self.vae),
+            optim = self.optim.state_dict(),
+            discr_optim = self.discr_optim.state_dict()
+        )
+        torch.save(pkg, path)
+
+    def load(self, path):
+        path = Path(path)
+        assert path.exists()
+        pkg = torch.load(path)
+
+        vae = self.accelerator.unwrap_model(self.vae)
+        vae.load_state_dict(pkg['model'])
+
+        self.optim.load_state_dict(pkg['optim'])
+        self.discr_optim.load_state_dict(pkg['discr_optim'])
+
     def print(self, msg):
         self.accelerator.print(msg)
 
