@@ -393,8 +393,10 @@ class PhenakiTrainer(object):
 
             # method to call
 
-            method_name = 'sample_images' if self.train_on_images else 'sample'
-            sample_method = getattr(self.model, method_name)
+            if self.train_on_images:
+                sample_method = self.model.sample_images
+            else:
+                sample_method = partial(self.model.sample, num_frames = self.sample_num_frames)
 
             # evaluate in groups, splitting the kwargs appropriately
 
