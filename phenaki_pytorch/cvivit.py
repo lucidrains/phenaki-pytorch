@@ -217,6 +217,7 @@ def pick_video_frame(video, frame_indices):
     batch, device = video.shape[0], video.device
     video = rearrange(video, 'b c f ... -> b f c ...')
     batch_indices = torch.arange(batch, device = device)
+    batch_indices = rearrange(batch_indices, 'b -> b 1')
     images = video[batch_indices, frame_indices]
     images = rearrange(images, 'b 1 c ... -> b c ...')
     return images
