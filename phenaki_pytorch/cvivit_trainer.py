@@ -283,7 +283,7 @@ class CViViTTrainer(nn.Module):
             vaes_to_evaluate = ((self.vae, str(steps)),)
 
             if self.use_ema:
-                vaes_to_evaluate = ((self.ema_vae.ema_model, f'{steps}.ema'),) + vae_to_evaluate
+                vaes_to_evaluate = ((self.ema_vae.ema_model, f'{steps}.ema'),) + vaes_to_evaluate
 
             for model, filename in vaes_to_evaluate:
                 model.eval()
