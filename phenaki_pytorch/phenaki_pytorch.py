@@ -663,7 +663,8 @@ class Phenaki(nn.Module):
                     noise = noise_K * (uniform(scores.shape, device) - 0.5) * noise_multiplier
                     scores = scores + noise
                 else:
-                    scores = logits.gather(2, rearrange(pred_video_ids, '... -> ... 1'))
+                    probs = logits.softmax(dim = -1)
+                    scores = probs.gather(2, rearrange(pred_video_ids, '... -> ... 1'))
                     scores = 1 - rearrange(scores, '... 1 -> ...')
                     scores = torch.where(mask, scores, -1e4)
 
