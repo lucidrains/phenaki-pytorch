@@ -340,9 +340,9 @@ class Phenaki(nn.Module):
         self,
         *,
         maskgit: MaskGit,
-        cvivit: CViViT = None,
-        critic: TokenCritic = None,
-        steps = 18,                         # 18 is the ideal steps with token critic
+        cvivit: CViViT,
+        critic: Optional[Union[TokenCritic, SelfCritic]] = None,
+        steps = 18, # 18 is the ideal steps with token critic
         t5_name = DEFAULT_T5_NAME,
         sample_temperature = 0.,
         text_embed_dim = None,
