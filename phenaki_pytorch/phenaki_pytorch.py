@@ -295,9 +295,13 @@ class TokenCritic(nn.Module):
         text_mask = None,
         cond_drop_prob = None,
         context = None,
+        video_patch_shape = None,
         **kwargs
     ):
-        video_shape = x.shape
+        if exists(video_patch_shape):
+            video_shape = (x.shape[0], *video_patch_shape)
+        else:
+            video_shape = x.shape
 
         x = rearrange(x, 'b ... -> b (...)')
         b, n, device = *x.shape, x.device
@@ -632,20 +636,28 @@ class Phenaki(nn.Module):
 
             if not is_last_step:
                 if exists(self.critic):
-                    critic_kwargs = dict()
+                    critic_kwargs = dict(
+                        video_patch_shape = patch_shape
+                    )
 
                     if self.critic.has_cross_attn:
-                        critic_kwargs = dict(
-                            context = text_embeds,
-                            text_mask = text_mask,
-                            cond_csale = cond_scale
-                        )
+                        critic_kwargs = {
+                            **critic_kwargs,
+                            'context': text_embeds,
+                            'text_mask': text_mask,
+                            'cond_scale': cond_scale
+                        }
 
                     with torch.no_grad():
+                        critic_input_token_ids = video_token_ids if not has_prime else torch.cat((prime_token_ids, video_token_ids), dim = -1)
+
                         scores = self.critic(
-                            video_token_ids,
+                            critic_input_token_ids,
                             **critic_kwargs
                         )
+
+                        if has_prime:
+                            scores = scores[:, prime_token_length:]
 
                     # different types of annealing
 
