@@ -148,7 +148,7 @@ A <a href="https://arxiv.org/abs/2209.04439">new paper</a> suggests that instead
 
 ```python
 import torch
-from phenaki_pytorch import CViViT, MaskGit, TokenCritic, PhenakiCritic
+from phenaki_pytorch import CViViT, MaskGit, TokenCritic, Phenaki
 
 cvivit = CViViT(
     dim = 512,
@@ -170,18 +170,21 @@ maskgit = MaskGit(
     depth = 6,
 )
 
+# (1) define the critic
+
 critic = TokenCritic(
     num_tokens = 5000,
     max_seq_len = 1024,
     dim = 512,
     dim_context = 768,
-    depth = 6
+    depth = 6,
+    has_cross_attn = True
 )
 
-critic_trainer = PhenakiCritic(
+trainer = Phenaki(
     maskgit = maskgit,
-    critic = critic,
-    cvivit = cvivit
+    cvivit = cvivit,
+    critic = critic    # and then (2) pass it into Phenaki
 ).cuda()
 
 texts = [
@@ -192,23 +195,20 @@ texts = [
 
 videos = torch.randn(3, 3, 3, 256, 128).cuda() # (batch, channels, frames, height, width)
 
-loss = critic_trainer(videos = videos, texts = texts)
+loss = trainer(videos = videos, texts = texts)
 loss.backward()
 ```
 
-Then just pass the critic to `Phenaki`
+Or even simpler, just reuse `MaskGit` itself as a <a href="https://aclanthology.org/2021.naacl-main.409.pdf">Self Critic (Nijkamp et al)</a>, by setting `self_token_critic = True` on the initialization of `Phenaki`
 
 ```python
-
 phenaki = Phenaki(
-    cvivit = cvivit,
-    maskgit = maskgit,
-    critic = critic
-).cuda()
-
+    ...,
+    self_token_critic= True  # set this to True
+)
 ```
 
-Now your generations should be greatly improved (but who knows, since this is only a month old research)
+Now your generations should be greatly improved!
 
 ## Phenaki Trainer
 
@@ -282,88 +282,6 @@ trainer = PhenakiTrainer(
     train_on_images = False, # if your mock dataset above return (images, caption) pairs, set this to True
     dataset = dataset,       # pass in your dataset here
     sample_texts_file_path = '/path/to/captions.txt' # each caption should be on a new line, during sampling, will be randomly drawn
-)
-
-trainer.train()
-```
-
-Token critic training is similarly
-
-```python
-import torch
-from torch.utils.data import Dataset
-from phenaki_pytorch import CViViT, MaskGit, Phenaki, PhenakiTrainer
-
-cvivit = CViViT(
-    dim = 512,
-    codebook_size = 5000,
-    image_size = 256,
-    patch_size = 32,
-    temporal_patch_size = 2,
-    spatial_depth = 4,
-    temporal_depth = 4,
-    dim_head = 64,
-    heads = 8
-)
-
-cvivit.load('/path/to/trained/cvivit.pt')
-
-maskgit = MaskGit(
-    num_tokens = 5000,
-    max_seq_len = 1024,
-    dim = 512,
-    dim_context = 768,
-    depth = 6,
-    unconditional = False
-)
-
-critic = TokenCritic(
-    num_tokens = 5000,
-    max_seq_len = 1024,
-    dim = 512,
-    dim_context = 768,
-    depth = 6
-)
-
-phenaki_critic = PhenakiCritic(
-    maskgit = maskgit,
-    critic = critic,
-    cvivit = cvivit
-).cuda()
-
-# mock text video dataset
-# you will have to extend your own, and return the (<video tensor>, <caption>) tuple
-
-class MockTextVideoDataset(Dataset):
-    def __init__(
-        self,
-        length = 100,
-        image_size = 256,
-        num_frames = 17
-    ):
-        super().__init__()
-        self.num_frames = num_frames
-        self.image_size = image_size
-        self.len = length
-
-    def __len__(self):
-        return self.len
-
-    def __getitem__(self, idx):
-        video = torch.randn(3, self.num_frames, self.image_size, self.image_size)
-        caption = 'video caption'
-        return video, caption
-
-dataset = MockTextVideoDataset()
-
-# pass in the dataset
-
-trainer = PhenakiCriticTrainer(
-    phenaki_critic = phenaki_critic,
-    batch_size = 4,
-    grad_accum_every = 4,
-    train_on_images = False, # if your mock dataset above return (images, caption) pairs, set this to True
-    dataset = dataset        # pass in your dataset here
 )
 
 trainer.train()
@@ -521,5 +439,14 @@ trainer.train()
     journal = {2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
     year    = {2022},
     pages   = {11999-12009}
+}
+```
+
+```bibtex
+@inproceedings{Nijkamp2021SCRIPTSP,
+    title   = {SCRIPT: Self-Critic PreTraining of Transformers},
+    author  = {Erik Nijkamp and Bo Pang and Ying Nian Wu and Caiming Xiong},
+    booktitle = {North American Chapter of the Association for Computational Linguistics},
+    year    = {2021}
 }
 ```

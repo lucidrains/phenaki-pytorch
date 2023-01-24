@@ -1,5 +1,6 @@
 import math
 import functools
+from contextlib import nullcontext
 from functools import partial, wraps
 
 from typing import Optional, List, Union
@@ -114,6 +115,8 @@ class MaskGit(nn.Module):
         **kwargs
     ):
         super().__init__()
+        self.dim = dim
+
         self.mask_id = num_tokens
         self.unconditional = unconditional
 
@@ -161,6 +164,7 @@ class MaskGit(nn.Module):
         text_mask = None,
         video_mask = None,
         video_patch_shape = None,
+        return_embeds = False,
         **kwargs
     ):
         assert x.ndim in {2, 4}, 'video token ids must be of shape (batch, seq) or (batch, frame, height, width)'
@@ -199,6 +203,9 @@ class MaskGit(nn.Module):
             cross_attn_context_mask = text_mask,
             **kwargs
         )
+
+        if return_embeds:
+            return x
 
         return self.to_logits(x)
 
@@ -258,6 +265,7 @@ class TokenCritic(nn.Module):
         text_mask = None,
         cond_drop_prob = None,
         context = None,
+        video_mask = None,
         video_patch_shape = None,
         **kwargs
     ):
@@ -283,158 +291,46 @@ class TokenCritic(nn.Module):
             x,
             video_shape = video_shape,
             context = context,
+            self_attn_mask = video_mask,
             cross_attn_context_mask = text_mask,
             **kwargs
         )
 
         return self.to_logits(x)
 
+# self critic - inspired by Nijkamp et al. (https://aclanthology.org/2021.naacl-main.409/)
+
 @beartype
-class PhenakiCritic(nn.Module):
+class SelfCritic(nn.Module):
     def __init__(
         self,
-        *,
-        maskgit: MaskGit,
-        critic: TokenCritic,
-        cvivit: Optional[CViViT] = None,
-        temperature = 0.,
-        t5_name = DEFAULT_T5_NAME,
-        text_embed_dim = None,
-        cond_drop_prob = 0.25,
-        max_text_len = 128
+        maskgit: MaskGit
     ):
         super().__init__()
-
-        if exists(cvivit):
-            self.cvivit = cvivit.copy_for_eval()
-
         self.maskgit = maskgit
-        self.unconditional = maskgit.unconditional
 
-        self.mask_id = maskgit.mask_id
+        self.to_pred = nn.Sequential(
+            nn.Linear(maskgit.dim, 1),
+            Rearrange('... 1 -> ...')
+        )
 
-        self.critic = critic
-        self.temperature = temperature
-
-        assert not (maskgit.unconditional and critic.has_cross_attn), 'critic does not need cross attention if maskgit is unconditional'
-
-        # text conditioning
-
-        text_embed_dim = default(text_embed_dim, get_encoded_dim(t5_name))
-        self.encode_texts = partial(t5_encode_text, name = t5_name)
-        self.text_embed_dim = text_embed_dim
-        self.max_text_len = max_text_len
-
-        assert cond_drop_prob > 0.
-        self.cond_drop_prob = cond_drop_prob # classifier free guidance for transformers - @crowsonkb
-
-    def forward(
+    def forward_with_cond_scale(
         self,
-        *,
-        videos = None,
-        video_codebook_ids = None,
-        texts: Optional[List[str]] = None,
-        text_embeds = None,
-        cond_drop_prob = None,
+        *args,
+        cond_scale = 3,
         **kwargs
     ):
-        # derive codebook ids
+        logits = self.forward(*args, cond_drop_prob = 0., **kwargs)
 
-        if not exists(video_codebook_ids):
-            assert exists(self.cvivit)
+        if cond_scale == 1:
+            return logits
 
-            self.cvivit.eval()
-            with torch.no_grad():
-                video_codebook_ids = self.cvivit(videos, return_only_codebook_ids = True)
+        null_logits = self.forward(*args, cond_drop_prob = 1., **kwargs)
+        return null_logits + (logits - null_logits) * cond_scale
 
-        assert video_codebook_ids.ndim == 4
-
-        x, codebook_packed_shape = pack([video_codebook_ids], 'b *')
-
-        batch, seq, device = *x.shape, x.device
-
-        self.critic.train()
-
-        # get time and number of tokens to mask
-
-        rand_time = uniform((1,), device)
-        num_tokens_mask = (seq * torch.cos(rand_time * math.pi * 0.5)).round().long().clamp(min = 1) # cosine schedule was best
-
-        _, indices = torch.randn((batch, seq), device = device).topk(num_tokens_mask.item(), dim = -1)
-
-        mask = torch.zeros((batch, seq), device = device).scatter(1, indices, 1.).bool()
-
-        # mask the input into maskgit
-
-        masked_input = torch.where(mask, self.mask_id, x)
-
-        # get text conditioning
-
-        text_mask = None
-        cond_drop_prob = 0
-
-        if not self.unconditional:
-            if not exists(text_embeds):
-                with torch.no_grad():
-                    text_embeds = self.encode_texts(texts, output_device = device)
-
-            text_mask = torch.any(text_embeds != 0, dim = -1) # save the researcher from having to think about mask, by assuming if all of the feature dimension is 0, it is masked out
-
-            # condition dropout for Katherine's (@crowsonkb) version of classifier free guidance for transformers
-
-            cond_drop_prob = default(cond_drop_prob, self.cond_drop_prob)
-
-        # get the input back to the original video token shape
-
-        masked_input, = unpack(masked_input, codebook_packed_shape, 'b *')
-
-        # predict masked tokens
-
-        with torch.no_grad():
-            self.maskgit.eval()
-
-            logits = self.maskgit(
-                masked_input,
-                context = text_embeds,
-                text_mask = text_mask,
-                cond_drop_prob = cond_drop_prob,
-                **kwargs
-            )
-
-        # sample the predicted masked tokens
-
-        if self.temperature <= 0:
-            pred_video_ids = logits.argmax(dim = -1)
-        else:
-            pred_video_ids = gumbel_sample(logits, temperature = self.temperature)
-
-        # derive critic input
-
-        critic_input = torch.where(mask, pred_video_ids, x)
-
-        # critic may or may not need text conditioning
-
-        critic_kwargs = dict()
-        if self.critic.has_cross_attn:
-            critic_kwargs = dict(
-                context = text_embeds,
-                text_mask = text_mask,
-                cond_drop_prob = cond_drop_prob
-            )
-
-        critic_input, = unpack(critic_input, codebook_packed_shape, 'b *')
-
-        pred_fake_or_real_logits = self.critic(
-            critic_input,
-            **critic_kwargs
-        )
-
-        critic_loss = F.binary_cross_entropy_with_logits(
-            pred_fake_or_real_logits,
-            mask.float()
-        )
-
-        return critic_loss
+    def forward(self, x, *args, **kwargs):
+        embeds = self.maskgit(x, *args, return_embeds = True, **kwargs)
+        return self.to_pred(embeds)
 
 # main class
 
@@ -452,7 +348,10 @@ class Phenaki(nn.Module):
         text_embed_dim = None,
         cond_drop_prob = 0.25,
         max_text_len = 128,
-        critic_noise_anneal_schedule = 'decay'
+        self_token_critic = False,
+        critic_loss_weight = 1.,
+        critic_noise_anneal_schedule = 'decay',
+        critic_train_sample_temperature = 1.
     ):
         super().__init__()
 
@@ -463,13 +362,23 @@ class Phenaki(nn.Module):
 
         self.mask_id = maskgit.mask_id
 
+        assert not (self_token_critic and exists(critic))
+
         # sampling
+
+        if self_token_critic:
+            critic = SelfCritic(maskgit)
 
         if exists(critic):
             critic = critic.eval()
 
+        assert not exists(critic) or self_token_critic or (not maskgit.unconditional) == critic.has_cross_attn
+
         self.critic = critic
         self.critic_noise_anneal_schedule = critic_noise_anneal_schedule
+
+        self.critic_loss_weight = critic_loss_weight
+        self.critic_train_sample_temperature = critic_train_sample_temperature
 
         self.steps = steps
         self.sample_temperature = sample_temperature
@@ -599,21 +508,16 @@ class Phenaki(nn.Module):
             if not is_last_step:
                 if exists(self.critic):
                     critic_kwargs = dict(
-                        video_patch_shape = patch_shape
+                        video_patch_shape = patch_shape,
+                        context = text_embeds,
+                        text_mask = text_mask,
+                        cond_scale = cond_scale
                     )
-
-                    if self.critic.has_cross_attn:
-                        critic_kwargs = {
-                            **critic_kwargs,
-                            'context': text_embeds,
-                            'text_mask': text_mask,
-                            'cond_scale': cond_scale
-                        }
 
                     with torch.no_grad():
                         critic_input_token_ids = video_token_ids if not has_prime else torch.cat((prime_token_ids, video_token_ids), dim = -1)
 
-                        scores = self.critic(
+                        scores = self.critic.forward_with_cond_scale(
                             critic_input_token_ids,
                             **critic_kwargs
                         )
@@ -660,8 +564,11 @@ class Phenaki(nn.Module):
         video_codebook_ids = None,
         video_frame_mask = None,
         text_embeds = None,
-        cond_drop_prob = None
+        cond_drop_prob = None,
+        only_train_generator = False,
+        only_train_critic = False
     ):
+        assert not (only_train_generator  and only_train_critic)
         assert exists(videos) ^ exists(video_codebook_ids), 'either raw video or '
         assert not (exists(videos) and not exists(self.cvivit)), 'cvivit must be provided if one wants to encode the videos live during training'
         assert (exists(text_embeds) ^ exists(texts)) ^ self.unconditional, 'either raw text of text embeds must be given, and if unconditional, none should be given'
@@ -721,20 +628,60 @@ class Phenaki(nn.Module):
 
         masked_input, = unpack(masked_input, packed_shape, 'b *')
 
-        logits = self.maskgit(
-            masked_input,
+        maskgit_forward_context = torch.no_grad if only_train_critic else nullcontext
+
+        with maskgit_forward_context():
+            logits = self.maskgit(
+                masked_input,
+                video_mask = video_mask,
+                cond_drop_prob = cond_drop_prob,
+                text_mask = text_mask,
+                context = text_embeds
+            )
+
+        if not only_train_critic:
+            loss = F.cross_entropy(
+                logits[mask_token_mask],
+                video_codebook_ids[mask_token_mask]
+            )
+
+        if not exists(self.critic) or only_train_generator:
+            return loss
+
+        # sample the predicted masked tokens
+
+        pred_video_ids = gumbel_sample(logits, temperature = self.critic_train_sample_temperature)
+
+        # derive critic input
+
+        critic_input = torch.where(mask_token_mask, pred_video_ids, video_codebook_ids)
+
+        # critic may or may not need text conditioning
+
+        critic_input, = unpack(critic_input, packed_shape, 'b *')
+
+        pred_fake_or_real_logits = self.critic(
+            critic_input,
             video_mask = video_mask,
             cond_drop_prob = cond_drop_prob,
             text_mask = text_mask,
             context = text_embeds
         )
 
-        loss = F.cross_entropy(
-            logits[mask_token_mask],
-            video_codebook_ids[mask_token_mask]
+        critic_labels = (video_codebook_ids != pred_video_ids).float()
+
+        critic_loss = F.binary_cross_entropy_with_logits(
+            pred_fake_or_real_logits,
+            critic_labels
         )
 
-        return loss
+        critic_loss_weight = self.critic_loss_weight
+
+        if only_train_critic:
+            loss = 0
+            critic_loss_weight = 1.
+
+        return loss + critic_loss * critic_loss_weight
 
 # make video function
 
