@@ -202,43 +202,6 @@ class MaskGit(nn.Module):
 
         return self.to_logits(x)
 
-class MaskGitTrainWrapper(nn.Module):
-    def __init__(
-        self,
-        maskgit,
-        *,
-        steps
-    ):
-        super().__init__()
-        self.maskgit = maskgit
-        self.mask_id = maskgit.mask_id
-
-        self.steps = steps
-
-    def forward(self, x, video_mask = None, **kwargs):
-        x, packed_shape = pack([x], 'b *')
-
-        batch, seq, device = *x.shape, x.device
-
-        self.maskgit.train()
-
-        rand_step = torch.randint(0, self.steps, (batch,), device = device)
-        mask_token_prob = torch.cos(rand_step * math.pi * 0.5 / self.steps) # cosine schedule was best
-
-        if not exists(video_mask):
-            video_mask = torch.ones((batch, seq), device = device).bool()
-
-        mask_token_mask = get_mask_subset_with_prob(video_mask, mask_token_prob)
-
-        masked_input = torch.where(mask_token_mask, self.mask_id, x)
-
-        masked_input, = unpack(masked_input, packed_shape, 'b *')
-
-        logits = self.maskgit(masked_input, video_mask = video_mask, **kwargs)
-
-        loss = F.cross_entropy(logits[mask_token_mask], x[mask_token_mask])
-        return loss
-
 # token critic
 
 class TokenCritic(nn.Module):
@@ -499,7 +462,6 @@ class Phenaki(nn.Module):
         self.unconditional = maskgit.unconditional
 
         self.mask_id = maskgit.mask_id
-        self.maskgit_trainer = MaskGitTrainWrapper(maskgit, steps = steps)
 
         # sampling
 
@@ -743,12 +705,33 @@ class Phenaki(nn.Module):
 
         # train maskgit with text condition
 
-        loss = self.maskgit_trainer(
-            video_codebook_ids,
-            cond_drop_prob = cond_drop_prob,
+        video_codebook_ids, packed_shape = pack([video_codebook_ids], 'b *')
+
+        batch, seq, device = *video_codebook_ids.shape, video_codebook_ids.device
+
+        rand_step = torch.randint(0, self.steps, (batch,), device = device)
+        mask_token_prob = torch.cos(rand_step * math.pi * 0.5 / self.steps) # cosine schedule was best
+
+        if not exists(video_mask):
+            video_mask = torch.ones((batch, seq), device = device).bool()
+
+        mask_token_mask = get_mask_subset_with_prob(video_mask, mask_token_prob)
+
+        masked_input = torch.where(mask_token_mask, self.mask_id, video_codebook_ids)
+
+        masked_input, = unpack(masked_input, packed_shape, 'b *')
+
+        logits = self.maskgit(
+            masked_input,
             video_mask = video_mask,
+            cond_drop_prob = cond_drop_prob,
             text_mask = text_mask,
             context = text_embeds
+        )
+
+        loss = F.cross_entropy(
+            logits[mask_token_mask],
+            video_codebook_ids[mask_token_mask]
         )
 
         return loss
