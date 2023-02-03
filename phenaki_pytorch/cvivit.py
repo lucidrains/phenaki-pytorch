@@ -269,12 +269,16 @@ class CViViT(nn.Module):
 
         self.to_patch_emb_first_frame = nn.Sequential(
             Rearrange('b c 1 (h p1) (w p2) -> b 1 h w (c p1 p2)', p1 = patch_height, p2 = patch_width),
-            nn.Linear(channels * patch_width * patch_height, dim)
+            nn.LayerNorm(channels * patch_width * patch_height),
+            nn.Linear(channels * patch_width * patch_height, dim),
+            nn.LayerNorm(dim)
         )
 
         self.to_patch_emb = nn.Sequential(
             Rearrange('b c (t pt) (h p1) (w p2) -> b t h w (c pt p1 p2)', p1 = patch_height, p2 = patch_width, pt = temporal_patch_size),
-            nn.Linear(channels * patch_width * patch_height * temporal_patch_size, dim)
+            nn.LayerNorm(channels * patch_width * patch_height * temporal_patch_size),
+            nn.Linear(channels * patch_width * patch_height * temporal_patch_size, dim),
+            nn.LayerNorm(dim)
         )
 
         transformer_kwargs = dict(
