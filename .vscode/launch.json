@@ -1,0 +1,39 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "artificial-workflow",
+            "request": "launch",
+            "name": "Debug Current Workflow File",
+            "program": "${file}"
+        },
+        {
+            "type": "wasm-chrome",
+            "request": "launch",
+            "name": "WebAssembly Debug",
+            "url": "http://localhost:8080/"
+        },
+        {
+            "type": "artificial-workflow",
+            "request": "launch",
+            "name": "Debug Current Workflow File",
+            "program": "${file}"
+        },
+        {
+            "type": "debug-kds",
+            "request": "launch",
+            "name": "Launch KDS",
+            "url": "http://localhost:8081",
+            "webRoot": "${workspaceFolder}"
+        },
+        {
+            "type": "artificial-workflow",
+            "request": "launch",
+            "name": "Debug Current Workflow File",
+            "program": "${file}"
+        }
+    ]
+}
