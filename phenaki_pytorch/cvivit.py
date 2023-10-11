@@ -421,7 +421,11 @@ class CViViT(nn.Module):
         self.load_state_dict(pt)
 
     def decode_from_codebook_indices(self, indices):
-        codes = self.vq.codebook[indices]
+        if self.lookup_free_quantization:
+            codes = self.vq.indices_to_codes(indices)
+        else:
+            codes = self.vq.codebook[indices]
+
         return self.decode(codes)
 
     @property
