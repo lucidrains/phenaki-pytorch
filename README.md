@@ -34,7 +34,7 @@ from phenaki_pytorch import CViViT, CViViTTrainer
 
 cvivit = CViViT(
     dim = 512,
-    codebook_size = 5000,
+    codebook_size = 65536,
     image_size = 256,
     patch_size = 32,
     temporal_patch_size = 2,
@@ -66,7 +66,7 @@ from phenaki_pytorch import CViViT, MaskGit, Phenaki
 
 cvivit = CViViT(
     dim = 512,
-    codebook_size = 5000,
+    codebook_size = 65536,
     image_size = (256, 128),  # video with rectangular screen allowed
     patch_size = 32,
     temporal_patch_size = 2,
@@ -152,7 +152,7 @@ from phenaki_pytorch import CViViT, MaskGit, TokenCritic, Phenaki
 
 cvivit = CViViT(
     dim = 512,
-    codebook_size = 5000,
+    codebook_size = 65536,
     image_size = (256, 128),
     patch_size = 32,
     temporal_patch_size = 2,
@@ -222,7 +222,7 @@ from phenaki_pytorch import CViViT, MaskGit, Phenaki, PhenakiTrainer
 
 cvivit = CViViT(
     dim = 512,
-    codebook_size = 5000,
+    codebook_size = 65536,
     image_size = 256,
     patch_size = 32,
     temporal_patch_size = 2,
@@ -297,7 +297,7 @@ from phenaki_pytorch import CViViT, MaskGit, Phenaki, PhenakiTrainer
 
 cvivit = CViViT(
     dim = 512,
-    codebook_size = 5000,
+    codebook_size = 65536,
     image_size = 256,
     patch_size = 32,
     temporal_patch_size = 2,
@@ -469,5 +469,27 @@ trainer.train()
     author = {Justin Gilmer, Andrea Schioppa, and Jeremy Cohen},
     year   = {2023},
     status = {to be published - one attention stabilization technique is circulating within Google Brain, being used by multiple teams}
+}
+```
+
+```bibtex
+@misc{mentzer2023finite,
+    title   = {Finite Scalar Quantization: VQ-VAE Made Simple},
+    author  = {Fabian Mentzer and David Minnen and Eirikur Agustsson and Michael Tschannen},
+    year    = {2023},
+    eprint  = {2309.15505},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CV}
+}
+```
+
+```bibtex
+@misc{yu2023language,
+    title   = {Language Model Beats Diffusion -- Tokenizer is Key to Visual Generation},
+    author  = {Lijun Yu and José Lezama and Nitesh B. Gundavarapu and Luca Versari and Kihyuk Sohn and David Minnen and Yong Cheng and Agrim Gupta and Xiuye Gu and Alexander G. Hauptmann and Boqing Gong and Ming-Hsuan Yang and Irfan Essa and David A. Ross and Lu Jiang},
+    year    = {2023},
+    eprint  = {2310.05737},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CV}
 }
 ```

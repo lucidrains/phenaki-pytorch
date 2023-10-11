@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
   name = 'phenaki-pytorch',
   packages = find_packages(exclude=[]),
-  version = '0.3.1',
+  version = '0.4.0',
   license='MIT',
   description = 'Phenaki - Pytorch',
   author = 'Phil Wang',
@@ -17,10 +17,10 @@ setup(
     'attention mechanisms',
     'text-to-video'
   ],
-  install_requires=[
+  install_requires = [
     'accelerate',
     'beartype',
-    'einops>=0.6',
+    'einops>=0.7',
     'ema-pytorch>=0.2.2',
     'opencv-python',
     'pillow',
@@ -31,7 +31,7 @@ setup(
     'torchvision',
     'transformers>=4.20.1',
     'tqdm',
-    'vector-quantize-pytorch>=0.10.15'
+    'vector-quantize-pytorch>=1.9.1'
   ],
   classifiers=[
     'Development Status :: 4 - Beta',

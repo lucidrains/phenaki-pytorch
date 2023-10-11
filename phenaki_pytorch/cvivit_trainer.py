@@ -149,14 +149,12 @@ class CViViTTrainer(nn.Module):
             self.vae,
             self.optim,
             self.discr_optim,
-            self.dl,
-            self.valid_dl
+            self.dl
         ) = self.accelerator.prepare(
             self.vae,
             self.optim,
             self.discr_optim,
-            self.dl,
-            self.valid_dl
+            self.dl
         )
 
         self.dl_iter = cycle(self.dl)
@@ -251,6 +249,8 @@ class CViViTTrainer(nn.Module):
 
         # update discriminator
 
+        self.accelerator.wait_for_everyone()
+
         if exists(self.vae.discr):
             self.discr_optim.zero_grad()
 
@@ -275,13 +275,18 @@ class CViViTTrainer(nn.Module):
 
         # update exponential moving averaged generator
 
+        self.accelerator.wait_for_everyone()
+
         if self.is_main and self.use_ema:
             self.ema_vae.update()
 
         # sample results every so often
 
+        self.accelerator.wait_for_everyone()
+
         if self.is_main and not (steps % self.save_results_every):
-            vaes_to_evaluate = ((self.vae, str(steps)),)
+            unwrapped_vae = self.accelerator.unwrap_model(self.vae)
+            vaes_to_evaluate = ((unwrapped_vae, str(steps)),)
 
             if self.use_ema:
                 vaes_to_evaluate = ((self.ema_vae.ema_model, f'{steps}.ema'),) + vaes_to_evaluate
@@ -320,6 +325,8 @@ class CViViTTrainer(nn.Module):
             self.print(f'{steps}: saving to {str(self.results_folder)}')
 
         # save model every so often
+
+        self.accelerator.wait_for_everyone()
 
         if self.is_main and not (steps % self.save_model_every):
             state_dict = self.vae.state_dict()

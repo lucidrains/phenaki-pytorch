@@ -13,7 +13,7 @@ import torchvision
 from einops import rearrange, repeat, pack, unpack
 from einops.layers.torch import Rearrange
 
-from vector_quantize_pytorch import VectorQuantize
+from vector_quantize_pytorch import VectorQuantize, LFQ
 
 from phenaki_pytorch.attention import Attention, Transformer, ContinuousPositionBias
 
@@ -242,7 +242,9 @@ class CViViT(nn.Module):
         discr_attn_res_layers = (16,),
         use_hinge_loss = True,
         attn_dropout = 0.,
-        ff_dropout = 0.
+        ff_dropout = 0.,
+        lookup_free_quantization = True,
+        lookup_free_quantization_kwargs: dict = {}
     ):
         """
         einstein notations:
@@ -294,7 +296,15 @@ class CViViT(nn.Module):
         self.enc_spatial_transformer = Transformer(depth = spatial_depth, **transformer_kwargs)
         self.enc_temporal_transformer = Transformer(depth = temporal_depth, **transformer_kwargs)
 
-        self.vq = VectorQuantize(dim = dim, codebook_size = codebook_size, use_cosine_sim = True)
+        # offer look up free quantization
+        # https://arxiv.org/abs/2310.05737
+
+        self.lookup_free_quantization = lookup_free_quantization
+
+        if lookup_free_quantization:
+            self.vq = LFQ(dim = dim, codebook_size = codebook_size, **lookup_free_quantization_kwargs)
+        else:
+            self.vq = VectorQuantize(dim = dim, codebook_size = codebook_size, use_cosine_sim = True)
 
         self.dec_spatial_transformer = Transformer(depth = spatial_depth, **transformer_kwargs)
         self.dec_temporal_transformer = Transformer(depth = temporal_depth, **transformer_kwargs)
@@ -537,7 +547,9 @@ class CViViT(nn.Module):
         if exists(mask):
             vq_mask = self.calculate_video_token_mask(video, mask)
 
-        tokens, indices, commit_loss = self.vq(tokens, mask = vq_mask)
+        vq_kwargs = dict(mask = vq_mask) if not self.lookup_free_quantization else dict()
+
+        tokens, indices, vq_aux_loss = self.vq(tokens, **vq_kwargs)
 
         if return_only_codebook_ids:
             indices, = unpack(indices, packed_fhw_shape, 'b *')
@@ -633,7 +645,7 @@ class CViViT(nn.Module):
 
         # combine losses
 
-        loss = recon_loss + perceptual_loss + commit_loss + adaptive_weight * gen_loss
+        loss = recon_loss + perceptual_loss + vq_aux_loss + adaptive_weight * gen_loss
 
         if return_recons:
             return loss, returned_recon
