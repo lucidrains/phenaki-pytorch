@@ -1,0 +1,56 @@
+
+dataset_config: &id001
+  refreshData: False
+  # useCLIP: openai/clip-vit-base-patch14
+  structure: e2e
+  data_json: dataset.json
+  data_folder: appimate1storage.blob.core.windows.net/datasets/Appimate
+  train_split: 0.9
+  max_text_length: 77
+  max_num_frames: 10
+  resolution: 128
+  frame_rate: 1
+  frame_rate_ratio: 0.01
+  num_channels: 1
+  normalize: True
+  scale_to: 0
+  has_start_end_token: True
+  output_format: TCHW
+
+optimizer_config: &id002
+  optimizer_type: Adam
+  learning_rate: 1e-4
+  weight_decay: 0.1
+  epsilon: 1e-8
+  betas: 
+    beta1: 0.9
+    beta2: 0.999
+  # scheduler:
+  #   warmup_steps: 4000
+  #   d_model: 4000
+
+cvivit_config:
+  bias: true
+  dataConfig: *id001
+  optimizerConfig: *id002
+  dropout: 0.1
+  embed_dim: 2048
+  num_heads: 8
+  num_layers: 2
+  patch_size: 128
+  model_name: AutoVisual
+
+trainer_config:
+  init_from: scratch # 'scratch' or 'resume' or 'app_gpt'
+  batch_size: 4
+  max_epochs: 100
+  save_every: 10
+  use_amp: True
+  grad_norm_clip: 1.0
+  # snapshot_path: s3://min-gpt-ddp/snapshot/auto_visual_snapshot.pt
+  # snapshot_path: appimate1storage.blob.core.windows.net/models/snapshot/auto_visual_snapshot.pt
+  snapshot_path: model/auto_visual_snapshot.pt
+
+hydra:
+  run:
+    dir: ./1
