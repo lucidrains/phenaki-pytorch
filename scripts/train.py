@@ -2,9 +2,7 @@ import os
 import argparse
 from omegaconf import OmegaConf
 import torch
-from phenaki_pytorch import CViViT, CViViTTrainer, MaskGit, Phenaki
-
-
+from phenaki_pytorch import CViViT, CViViTTrainer, MaskGit, Phenaki, PhenakiTrainer
 
 def main(config):
     cvivit = CViViT(
@@ -48,19 +46,14 @@ def main(config):
         cvivit = cvivit,
         maskgit = maskgit
     ).cuda()
-
-
-    videos = torch.randn(3, 3, 17, 256, 256)#.cuda() # (batch, channels, frames, height, width)
-    mask = torch.ones((3, 17)).bool()#.cuda() # [optional] (batch, frames) - allows for co-training videos of different lengths as well as video and images in the same batch
-    texts = [
-        'a whale breaching from afar',
-        'young girl blowing out candles on her birthday cake',
-        'fireworks with blue and green sparkles'
-    ]
-    for epoch in range(0, config['num_epochs']):
-        loss = phenaki(videos, texts = texts, video_frame_mask = mask)
-        loss.backward()
-        # do the above for many steps, then ...
+    phenaki_trainer = PhenakiTrainer(
+        phenaki,
+        batch_size=4,
+        num_frames=17,
+        train_lr=0.0001,
+        train_num_steps=config['num_epochs'],
+    )
+    phenaki_trainer.train()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

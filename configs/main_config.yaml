@@ -4,7 +4,7 @@ dataset_config: &id001
   # useCLIP: openai/clip-vit-base-patch14
   structure: e2e
   data_json: dataset.json
-  data_folder: appimate1storage.blob.core.windows.net/datasets/Appimate
+  data_folder: https://appimate1storage.blob.core.windows.net/datasets/Appimate
   train_split: 0.9
   max_text_length: 77
   max_num_frames: 10
