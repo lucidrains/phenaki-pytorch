@@ -1,5 +1,7 @@
+import io
 import math
 import copy
+import boto3
 from pathlib import Path
 from random import random, choices
 from functools import partial
@@ -329,6 +331,10 @@ class PhenakiTrainer(object):
             'scaler': self.accelerator.scaler.state_dict() if exists(self.accelerator.scaler) else None
         }
 
+        # buffer = io.BytesIO()
+        # torch.save(data, buffer)
+        # buffer.seek(0)
+        # dts = urlparse(dts, allow_fragments=False)
         torch.save(data, str(self.results_folder / f'model-{milestone}.pt'))
 
     def load(self, milestone):
