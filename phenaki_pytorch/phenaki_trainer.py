@@ -31,7 +31,7 @@ from PIL import Image
 from tqdm.auto import tqdm
 
 from phenaki_pytorch.optimizer import get_optimizer
-from accelerate import Accelerator
+from accelerate import Accelerator, data_loader
 
 from phenaki_pytorch.phenaki_pytorch import Phenaki
 
@@ -267,6 +267,7 @@ class PhenakiTrainer(object):
             assert exists(folder)
             self.ds = VideoDataset(folder, self.image_size, num_frames = num_frames)
 
+        # dl = data_loader.AccelerateDataLoader(self.ds, batch_size = batch_size, shuffle = True, pin_memory = True, num_workers = cpu_count())
         dl = DataLoader(self.ds, batch_size = batch_size, shuffle = True, pin_memory = True, num_workers = cpu_count())
 
         dl = self.accelerator.prepare(dl)
