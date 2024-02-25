@@ -1,5 +1,4 @@
 import math
-import functools
 from contextlib import nullcontext
 from functools import partial, wraps
 
@@ -13,30 +12,14 @@ from torch import nn, einsum
 from einops import rearrange, repeat, pack, unpack
 from einops.layers.torch import Rearrange
 
-from phenaki_pytorch.t5 import t5_encode_text, get_encoded_dim, DEFAULT_T5_NAME
+from .t5 import t5_encode_text, get_encoded_dim, DEFAULT_T5_NAME
+from .cvivit import CViViT
+from .mask_git import MaskGit
+from .attention import Attention, Transformer
+from .utils import exists, default, cast_tuple, prob_mask_like, uniform
 
-from phenaki_pytorch.cvivit import CViViT
-from phenaki_pytorch.attention import Attention, Transformer, ContinuousPositionBias
-
-# helpers
-
-def exists(val):
-    return val is not None
-
-def default(val, d):
-    return val if exists(val) else d
-
-def cast_tuple(val, length = 1):
-    return val if isinstance(val, tuple) else (val,) * length
-
-def reduce_mult(arr):
-    return functools.reduce(lambda x, y: x * y, arr)
-
-def divisible_by(numer, denom):
-    return (numer % denom) == 0
 
 # tensor helpers
-
 def get_mask_subset_with_prob(mask, prob):
     batch, seq_len, device = *mask.shape, mask.device
 
@@ -52,7 +35,6 @@ def get_mask_subset_with_prob(mask, prob):
     return mask_subset
 
 # decorators
-
 def eval_decorator(fn):
     def inner(model, *args, **kwargs):
         was_training = model.training
@@ -62,26 +44,13 @@ def eval_decorator(fn):
         return out
     return inner
 
-# classifier free guidance functions
 
-def uniform(shape, device):
-    return torch.zeros(shape, device = device).float().uniform_(0, 1)
-
-def prob_mask_like(shape, prob, device):
-    if prob == 1:
-        return torch.ones(shape, device = device, dtype = torch.bool)
-    elif prob == 0:
-        return torch.zeros(shape, device = device, dtype = torch.bool)
-    else:
-        return torch.zeros(shape, device = device).float().uniform_(0, 1) < prob
 
 # tensor helper functions
-
 def log(t, eps = 1e-10):
     return torch.log(t + eps)
 
 # sampling helpers
-
 def gumbel_noise(t):
     noise = torch.zeros_like(t).uniform_(0, 1)
     return -log(-log(noise))
@@ -97,120 +66,8 @@ def top_k(logits, thres = 0.5):
     probs.scatter_(1, ind, val)
     return probs
 
-# mask git
-
-class MaskGit(nn.Module):
-    def __init__(
-        self,
-        *,
-        dim,
-        num_tokens,
-        max_seq_len,
-        gradient_shrink_alpha = 0.1,
-        heads = 8,
-        dim_head = 64,
-        unconditional = False,
-        attn_dropout = 0.,
-        ff_dropout = 0.,
-        **kwargs
-    ):
-        super().__init__()
-        self.dim = dim
-
-        self.mask_id = num_tokens
-        self.unconditional = unconditional
-
-        self.token_emb = nn.Embedding(num_tokens + 1, dim) # last token is used as mask_id
-
-        self.max_seq_len = max_seq_len
-        self.pos_emb = nn.Embedding(max_seq_len, dim)
-
-        self.gradient_shrink_alpha = gradient_shrink_alpha  # used with great success in cogview and GLM 130B attention net
-
-        self.continuous_pos_bias = ContinuousPositionBias(dim = dim_head, heads = heads, num_dims = 3)
-
-        self.transformer = Transformer(
-            dim = dim,
-            attn_num_null_kv = 2,
-            has_cross_attn = not self.unconditional,
-            dim_head = dim_head,
-            heads = heads,
-            attn_dropout = attn_dropout,
-            ff_dropout = ff_dropout,
-            peg = True,
-            **kwargs
-        )
-
-        self.to_logits = nn.Linear(dim, num_tokens)
-
-    def forward_with_cond_scale(
-        self,
-        *args,
-        cond_scale = 3,
-        **kwargs
-    ):
-        logits = self.forward(*args, cond_drop_prob = 0., **kwargs)
-
-        if cond_scale == 1:
-            return logits
-
-        null_logits = self.forward(*args, cond_drop_prob = 1., **kwargs)
-        return null_logits + (logits - null_logits) * cond_scale
-
-    def forward(
-        self,
-        x,
-        cond_drop_prob = 0.,
-        text_mask = None,
-        video_mask = None,
-        video_patch_shape = None,
-        return_embeds = False,
-        **kwargs
-    ):
-        assert x.ndim in {2, 4}, 'video token ids must be of shape (batch, seq) or (batch, frame, height, width)'
-
-        if x.ndim == 4:
-            video_patch_shape = x.shape[1:]
-            x = rearrange(x, 'b ... -> b (...)')
-
-        b, n, device = *x.shape, x.device
-
-        if not exists(text_mask):
-            text_mask = torch.ones((b, n), device = device, dtype = torch.bool)
-
-        assert exists(video_patch_shape), 'video patch shape must be given'
-
-        rel_pos_bias = self.continuous_pos_bias(*video_patch_shape, device = device)
-
-        if cond_drop_prob > 0:
-            keep_mask = prob_mask_like((b,), 1 - cond_drop_prob, device = device)
-            text_mask = rearrange(keep_mask, 'b -> b 1') & text_mask
-
-        video_shape = (b, *video_patch_shape)
-
-        x = self.token_emb(x)
-
-        assert n <= self.max_seq_len, f'the video token sequence length you are passing in ({n}) is greater than the `max_seq_len` ({self.max_seq_len}) set on your `MaskGit`'
-        x = self.pos_emb(torch.arange(n, device = device)) + x
-
-        x = x * self.gradient_shrink_alpha + x.detach() * (1 - self.gradient_shrink_alpha)
-
-        x = self.transformer(
-            x,
-            video_shape = video_shape,
-            attn_bias = rel_pos_bias,
-            self_attn_mask = video_mask,
-            cross_attn_context_mask = text_mask,
-            **kwargs
-        )
-
-        if return_embeds:
-            return x
-
-        return self.to_logits(x)
 
 # token critic
-
 class TokenCritic(nn.Module):
     def __init__(
         self,
@@ -339,7 +196,7 @@ class Phenaki(nn.Module):
     def __init__(
         self,
         *,
-        maskgit: MaskGit,
+        maskgit: Optional[MaskGit] ,
         cvivit: CViViT,
         critic: Optional[Union[TokenCritic, SelfCritic]] = None,
         steps = 18, # 18 is the ideal steps with token critic
@@ -357,15 +214,22 @@ class Phenaki(nn.Module):
 
         self.cvivit = cvivit.copy_for_eval()
 
-        self.maskgit = maskgit
+        if maskgit is not None:
+            self.maskgit = maskgit
+        else:
+            self.maskgit = MaskGit(
+                dim=cvivit.dim,
+                num_tokens=cvivit.codebook_size,
+                max_seq_len = 1024,
+                dim_context = 768,
+                depth = 6
+            )
+
         self.unconditional = maskgit.unconditional
-
         self.mask_id = maskgit.mask_id
-
         assert not (self_token_critic and exists(critic))
 
         # sampling
-
         if self_token_critic:
             critic = SelfCritic(maskgit)
 
@@ -586,7 +450,6 @@ class Phenaki(nn.Module):
                 video_codebook_ids = self.cvivit(videos, return_only_codebook_ids = True)
 
         # derive text embeddings, mask, conditional dropout
-
         text_mask = None
         cond_drop_prob = 0
 
@@ -598,11 +461,9 @@ class Phenaki(nn.Module):
             text_mask = torch.any(text_embeds != 0, dim = -1) # save the researcher from having to think about mask, by assuming if all of the feature dimension is 0, it is masked out
 
             # condition dropout for Katherine's (@crowsonkb) version of classifier free guidance for transformers
-
             cond_drop_prob = default(cond_drop_prob, self.cond_drop_prob)
 
         # calculate video frame mask
-
         video_mask = None
         if exists(video_frame_mask):
             video_mask = self.cvivit.calculate_video_token_mask(
@@ -611,7 +472,6 @@ class Phenaki(nn.Module):
             )
 
         # train maskgit with text condition
-
         video_codebook_ids, packed_shape = pack([video_codebook_ids], 'b *')
 
         batch, seq, device = *video_codebook_ids.shape, video_codebook_ids.device
@@ -649,15 +509,12 @@ class Phenaki(nn.Module):
             return loss
 
         # sample the predicted masked tokens
-
         pred_video_ids = gumbel_sample(logits, temperature = self.critic_train_sample_temperature)
 
         # derive critic input
-
         critic_input = torch.where(mask_token_mask, pred_video_ids, video_codebook_ids)
 
         # critic may or may not need text conditioning
-
         critic_input, = unpack(critic_input, packed_shape, 'b *')
 
         pred_fake_or_real_logits = self.critic(

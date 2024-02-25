@@ -202,7 +202,7 @@ class VideoDataset(Dataset):
         num_frames = 17,
         horizontal_flip = False,
         force_num_frames = True,
-        exts = ['gif', 'mp4', 'mov']
+        exts = ['gif', 'mp4']
     ):
         super().__init__()
         self.folder = folder
