@@ -1,4 +1,6 @@
+from datetime import datetime
 from math import sqrt
+from tqdm import tqdm
 from random import choice
 from pathlib import Path
 from shutil import rmtree
@@ -8,21 +10,20 @@ from beartype import beartype
 import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader, random_split
-
 import torchvision.transforms as T
 from torchvision.datasets import ImageFolder
 from torchvision.utils import make_grid, save_image
 
 from einops import rearrange
 
+from phenaki_pytorch.utils import format_datetime
 from phenaki_pytorch.optimizer import get_optimizer
-
-from ema_pytorch import EMA
-
 from phenaki_pytorch.cvivit import CViViT
 from phenaki_pytorch.data import ImageDataset, VideoDataset, video_tensor_to_gif
 
+from ema_pytorch import EMA
 from accelerate import Accelerator
+
 
 # helpers
 
@@ -251,6 +252,7 @@ class CViViTTrainer(nn.Module):
         if exists(self.vae.discr):
             self.discr_optim.zero_grad()
 
+            # for _ in tqdm(range(self.grad_accum_every), leave=True, ncols=90, colour='#00FFFF' ):
             for _ in range(self.grad_accum_every):
                 img = next(self.dl_iter)
                 img = img.to(device)
@@ -265,7 +267,7 @@ class CViViTTrainer(nn.Module):
             self.discr_optim.step()
 
             # log
-
+            # if (steps % self.grad_accum_every == 0):
             self.print(f"{steps}: vae loss: {logs['loss']} - discr loss: {logs['discr_loss']}")
 
         # update exponential moving averaged generator
@@ -329,10 +331,11 @@ class CViViTTrainer(nn.Module):
         return logs
 
     def train(self, log_fn = noop):
+        print(format_datetime())
         device = next(self.vae.parameters()).device
-
         while self.steps < self.num_train_steps:
             logs = self.train_step()
             log_fn(logs)
 
         self.print('training complete')
+        print(format_datetime(input_datetime=datetime.now()))

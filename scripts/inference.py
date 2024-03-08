@@ -15,16 +15,8 @@ def main(cfg):
     )
     # cvivit.load('/path/to/trained/cvivit.pt')
     cvivit.load(cfg.path_to_cvivit)
-    maskgit = MaskGit(
-        num_tokens = 5000,
-        max_seq_len = 1024,
-        dim = 512,
-        dim_context = 768,
-        depth = 6,
-    )
     phenaki = Phenaki(
         cvivit = cvivit,
-        maskgit = maskgit
     ).cuda()
     video = phenaki.sample(texts = cfg.prompt, num_frames = 17, cond_scale = 5.) # (1, 3, 17, 256, 128)
     video_prime = video[:, :, -3:] # (1, 3, 3, 256, 128) # say K = 3

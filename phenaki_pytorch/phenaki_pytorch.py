@@ -196,7 +196,7 @@ class Phenaki(nn.Module):
     def __init__(
         self,
         *,
-        maskgit: Optional[MaskGit] ,
+        maskgit: Optional[MaskGit],
         cvivit: CViViT,
         critic: Optional[Union[TokenCritic, SelfCritic]] = None,
         steps = 18, # 18 is the ideal steps with token critic
