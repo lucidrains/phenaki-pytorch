@@ -1,0 +1,4 @@
+Please simplify this expression: (x+1)(x-1)
+Please simplify this expression: (x+2)(x-2)
+Please simplify this expression: (x+3)(x-3)
+Please simplify this expression: (x+4)(x-4)

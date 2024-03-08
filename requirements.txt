@@ -1,0 +1,15 @@
+# torch>=1.6
+torch
+accelerate
+beartype
+einops>=0.7
+ema-pytorch>=0.2.2
+opencv-python
+pillow
+numpy
+sentencepiece
+torchtyping
+torchvision
+transformers>=4.20.1
+tqdm
+vector-quantize-pytorch>=1.11.8

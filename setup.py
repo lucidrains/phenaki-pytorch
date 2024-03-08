@@ -1,5 +1,9 @@
 from setuptools import setup, find_packages
 
+def parse_requirements(filename):
+    lines = (line.strip() for line in open(filename))
+    return [line for line in lines if line and not line.startswith('#')]
+
 setup(
   name = 'phenaki-pytorch',
   packages = find_packages(exclude=[]),
@@ -17,22 +21,7 @@ setup(
     'attention mechanisms',
     'text-to-video'
   ],
-  install_requires = [
-    'accelerate',
-    'beartype',
-    'einops>=0.7',
-    'ema-pytorch>=0.2.2',
-    'opencv-python',
-    'pillow',
-    'numpy',
-    'sentencepiece',
-    'torch>=1.6',
-    'torchtyping',
-    'torchvision',
-    'transformers>=4.20.1',
-    'tqdm',
-    'vector-quantize-pytorch>=1.11.8'
-  ],
+  install_requires=parse_requirements('requirements.txt'),
   classifiers=[
     'Development Status :: 4 - Beta',
     'Intended Audience :: Developers',

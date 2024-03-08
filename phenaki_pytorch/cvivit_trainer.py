@@ -1,4 +1,6 @@
+from datetime import datetime
 from math import sqrt
+from tqdm import tqdm
 from random import choice
 from pathlib import Path
 from shutil import rmtree
@@ -8,21 +10,20 @@ from beartype import beartype
 import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader, random_split
-
 import torchvision.transforms as T
 from torchvision.datasets import ImageFolder
 from torchvision.utils import make_grid, save_image
 
 from einops import rearrange
 
+from phenaki_pytorch.utils import format_datetime
 from phenaki_pytorch.optimizer import get_optimizer
-
-from ema_pytorch import EMA
-
 from phenaki_pytorch.cvivit import CViViT
 from phenaki_pytorch.data import ImageDataset, VideoDataset, video_tensor_to_gif
 
+from ema_pytorch import EMA
 from accelerate import Accelerator
+
 
 # helpers
 
@@ -222,11 +223,9 @@ class CViViTTrainer(nn.Module):
         self.vae.train()
 
         # logs
-
         logs = {}
 
         # update vae (generator)
-
         for _ in range(self.grad_accum_every):
             img = next(self.dl_iter)
             img = img.to(device)
@@ -250,18 +249,16 @@ class CViViTTrainer(nn.Module):
         # update discriminator
 
         self.accelerator.wait_for_everyone()
-
         if exists(self.vae.discr):
             self.discr_optim.zero_grad()
 
+            # for _ in tqdm(range(self.grad_accum_every), leave=True, ncols=90, colour='#00FFFF' ):
             for _ in range(self.grad_accum_every):
                 img = next(self.dl_iter)
                 img = img.to(device)
 
                 loss = self.vae(img, return_discr_loss = True)
-
                 self.accelerator.backward(loss / self.grad_accum_every)
-
                 accum_log(logs, {'discr_loss': loss.item() / self.grad_accum_every})
 
             if exists(self.discr_max_grad_norm):
@@ -270,18 +267,15 @@ class CViViTTrainer(nn.Module):
             self.discr_optim.step()
 
             # log
-
+            # if (steps % self.grad_accum_every == 0):
             self.print(f"{steps}: vae loss: {logs['loss']} - discr loss: {logs['discr_loss']}")
 
         # update exponential moving averaged generator
-
         self.accelerator.wait_for_everyone()
-
         if self.is_main and self.use_ema:
             self.ema_vae.update()
 
         # sample results every so often
-
         self.accelerator.wait_for_everyone()
 
         if self.is_main and not (steps % self.save_results_every):
@@ -295,16 +289,12 @@ class CViViTTrainer(nn.Module):
                 model.eval()
 
                 valid_data = next(self.valid_dl_iter)
-
                 is_video = valid_data.ndim == 5
-
                 valid_data = valid_data.to(device)
-
                 recons = model(valid_data, return_recons_only = True)
 
                 # if is video, save gifs to folder
                 # else save a grid of images
-
                 if is_video:
                     sampled_videos_path = self.results_folder / f'samples.{filename}'
                     (sampled_videos_path).mkdir(parents = True, exist_ok = True)
@@ -317,9 +307,7 @@ class CViViTTrainer(nn.Module):
 
                     imgs_and_recons = imgs_and_recons.detach().cpu().float().clamp(0., 1.)
                     grid = make_grid(imgs_and_recons, nrow = 2, normalize = True, value_range = (0, 1))
-
                     logs['reconstructions'] = grid
-
                     save_image(grid, str(self.results_folder / f'{filename}.png'))
 
             self.print(f'{steps}: saving to {str(self.results_folder)}')
@@ -327,7 +315,6 @@ class CViViTTrainer(nn.Module):
         # save model every so often
 
         self.accelerator.wait_for_everyone()
-
         if self.is_main and not (steps % self.save_model_every):
             state_dict = self.vae.state_dict()
             model_path = str(self.results_folder / f'vae.{steps}.pt')
@@ -344,10 +331,11 @@ class CViViTTrainer(nn.Module):
         return logs
 
     def train(self, log_fn = noop):
+        print(format_datetime())
         device = next(self.vae.parameters()).device
-
         while self.steps < self.num_train_steps:
             logs = self.train_step()
             log_fn(logs)
 
         self.print('training complete')
+        print(format_datetime(input_datetime=datetime.now()))
