@@ -163,7 +163,7 @@ cvivit = CViViT(
 )
 
 maskgit = MaskGit(
-    num_tokens = 5000,
+    num_tokens = 65536,
     max_seq_len = 1024,
     dim = 512,
     dim_context = 768,
@@ -173,7 +173,7 @@ maskgit = MaskGit(
 # (1) define the critic
 
 critic = TokenCritic(
-    num_tokens = 5000,
+    num_tokens = 65536,
     max_seq_len = 1024,
     dim = 512,
     dim_context = 768,

@@ -283,18 +283,31 @@ class CViViT(nn.Module):
             nn.LayerNorm(dim)
         )
 
-        transformer_kwargs = dict(
+        spatial_transformer_kwargs = dict(
             dim = dim,
             dim_head = dim_head,
             heads = heads,
             attn_dropout = attn_dropout,
             ff_dropout = ff_dropout,
+            causal = False,
+            peg = False,
+        )
+
+        # only temporal transformers have PEG and are causal
+
+        temporal_transformer_kwargs = dict(
+            dim = dim,
+            dim_head = dim_head,
+            heads = heads,
+            attn_dropout = attn_dropout,
+            ff_dropout = ff_dropout,
+            causal = True,
             peg = True,
             peg_causal = True,
         )
 
-        self.enc_spatial_transformer = Transformer(depth = spatial_depth, **transformer_kwargs)
-        self.enc_temporal_transformer = Transformer(depth = temporal_depth, **transformer_kwargs)
+        self.enc_spatial_transformer = Transformer(depth = spatial_depth, **spatial_transformer_kwargs)
+        self.enc_temporal_transformer = Transformer(depth = temporal_depth, **temporal_transformer_kwargs)
 
         # offer look up free quantization
         # https://arxiv.org/abs/2310.05737
@@ -306,8 +319,8 @@ class CViViT(nn.Module):
         else:
             self.vq = VectorQuantize(dim = dim, codebook_size = codebook_size, use_cosine_sim = True)
 
-        self.dec_spatial_transformer = Transformer(depth = spatial_depth, **transformer_kwargs)
-        self.dec_temporal_transformer = Transformer(depth = temporal_depth, **transformer_kwargs)
+        self.dec_spatial_transformer = Transformer(depth = spatial_depth, **spatial_transformer_kwargs)
+        self.dec_temporal_transformer = Transformer(depth = temporal_depth, **temporal_transformer_kwargs)
 
         self.to_pixels_first_frame = nn.Sequential(
             nn.Linear(dim, channels * patch_width * patch_height),
