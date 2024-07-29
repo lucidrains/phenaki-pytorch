@@ -2,6 +2,7 @@ import math
 import torch
 import torch.nn.functional as F
 from torch import nn, einsum
+from torch.nn import Module, ModuleList
 
 from beartype import beartype
 from typing import Tuple
@@ -25,7 +26,7 @@ def l2norm(t):
 # bias-less layernorm, being used in more recent T5s, PaLM, also in @borisdayma 's experiments shared with me
 # greater stability
 
-class LayerNorm(nn.Module):
+class LayerNorm(Module):
     def __init__(self, dim):
         super().__init__()
         self.gamma = nn.Parameter(torch.ones(dim))
@@ -36,7 +37,7 @@ class LayerNorm(nn.Module):
 
 # feedforward
 
-class GEGLU(nn.Module):
+class GEGLU(Module):
     def forward(self, x):
         x, gate = x.chunk(2, dim = -1)
         return F.gelu(gate) * x
@@ -53,7 +54,7 @@ def FeedForward(dim, mult = 4, dropout = 0.):
 
 # PEG - position generating module
 
-class PEG(nn.Module):
+class PEG(Module):
     def __init__(self, dim, causal = False):
         super().__init__()
         self.causal = causal
@@ -85,7 +86,7 @@ class PEG(nn.Module):
 
 # attention
 
-class Attention(nn.Module):
+class Attention(Module):
     def __init__(
         self,
         dim,
@@ -182,7 +183,7 @@ class Attention(nn.Module):
 
 # alibi positional bias for extrapolation
 
-class AlibiPositionalBias(nn.Module):
+class AlibiPositionalBias(Module):
     def __init__(self, heads):
         super().__init__()
         self.heads = heads
@@ -225,7 +226,7 @@ class AlibiPositionalBias(nn.Module):
 
         return self.bias
 
-class ContinuousPositionBias(nn.Module):
+class ContinuousPositionBias(Module):
     """ from https://arxiv.org/abs/2111.09883 """
 
     def __init__(
@@ -242,7 +243,7 @@ class ContinuousPositionBias(nn.Module):
         self.num_dims = num_dims
         self.log_dist = log_dist
 
-        self.net = nn.ModuleList([])
+        self.net = ModuleList([])
         self.net.append(nn.Sequential(nn.Linear(self.num_dims, dim), leaky_relu()))
 
         for _ in range(layers - 1):
@@ -275,7 +276,7 @@ class ContinuousPositionBias(nn.Module):
 
 # transformer
 
-class Transformer(nn.Module):
+class Transformer(Module):
     def __init__(
         self,
         dim,
@@ -294,10 +295,10 @@ class Transformer(nn.Module):
         ff_dropout = 0.
     ):
         super().__init__()
-        self.layers = nn.ModuleList([])
+        self.layers = ModuleList([])
 
         for _ in range(depth):
-            self.layers.append(nn.ModuleList([
+            self.layers.append(ModuleList([
                 PEG(dim = dim, causal = peg_causal) if peg else None,
                 Attention(dim = dim, dim_head = dim_head, heads = heads, causal = causal, dropout = attn_dropout),
                 Attention(dim = dim, dim_head = dim_head, dim_context = dim_context, heads = heads, causal = False, num_null_kv = attn_num_null_kv, dropout = attn_dropout) if has_cross_attn else None,

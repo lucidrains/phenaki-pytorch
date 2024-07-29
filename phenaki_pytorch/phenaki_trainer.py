@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import math
 import copy
 from pathlib import Path
@@ -9,7 +11,7 @@ from multiprocessing import cpu_count
 from beartype import beartype
 from beartype.door import is_bearable
 from beartype.vale import Is
-from typing import Optional, List, Iterable, Tuple
+from typing import List, Iterable, Tuple
 from typing_extensions import Annotated
 
 import torch
@@ -196,9 +198,9 @@ class PhenakiTrainer(object):
         split_batches = True,
         convert_image_to = None,
         sample_texts_file_path = None,  # path to a text file with video captions, delimited by newline
-        sample_texts: Optional[List[str]] = None,
-        dataset: Optional[Dataset] = None,
-        dataset_fields: Optional[Tuple[str, ...]] = None
+        sample_texts: List[str] | None = None,
+        dataset: Dataset | None = None,
+        dataset_fields: Tuple[str, ...] | None = None
     ):
         super().__init__()
         maskgit = phenaki.maskgit

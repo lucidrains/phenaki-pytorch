@@ -1,14 +1,17 @@
+from __future__ import annotations
+
 import math
 import functools
 from contextlib import nullcontext
 from functools import partial, wraps
 
-from typing import Optional, List, Union
+from typing import List
 from beartype import beartype
 
 import torch
 import torch.nn.functional as F
 from torch import nn, einsum
+from torch.nn import Module
 
 from einops import rearrange, repeat, pack, unpack
 from einops.layers.torch import Rearrange
@@ -99,7 +102,7 @@ def top_k(logits, thres = 0.5):
 
 # mask git
 
-class MaskGit(nn.Module):
+class MaskGit(Module):
     def __init__(
         self,
         *,
@@ -211,7 +214,7 @@ class MaskGit(nn.Module):
 
 # token critic
 
-class TokenCritic(nn.Module):
+class TokenCritic(Module):
     def __init__(
         self,
         *,
@@ -301,7 +304,7 @@ class TokenCritic(nn.Module):
 # self critic - inspired by Nijkamp et al. (https://aclanthology.org/2021.naacl-main.409/)
 
 @beartype
-class SelfCritic(nn.Module):
+class SelfCritic(Module):
     def __init__(
         self,
         maskgit: MaskGit
@@ -335,13 +338,13 @@ class SelfCritic(nn.Module):
 # main class
 
 @beartype
-class Phenaki(nn.Module):
+class Phenaki(Module):
     def __init__(
         self,
         *,
         maskgit: MaskGit,
         cvivit: CViViT,
-        critic: Optional[Union[TokenCritic, SelfCritic]] = None,
+        critic: TokenCritic | SelfCritic | None = None,
         steps = 18, # 18 is the ideal steps with token critic
         t5_name = DEFAULT_T5_NAME,
         sample_temperature = 0.,
@@ -396,7 +399,7 @@ class Phenaki(nn.Module):
     def sample_images(
         self,
         *,
-        texts: Union[List[str], str] = None,
+        texts: List[str] | str | None = None,
         batch_size = 1,
         cond_scale = 3.,
         starting_temperature = 0.9,
@@ -418,7 +421,7 @@ class Phenaki(nn.Module):
         self,
         *,
         num_frames,
-        texts: Union[List[str], str] = None,
+        texts: List[str] | str | None = None,
         prime_frames = None,
         batch_size = 1,
         cond_scale = 3.,
@@ -560,7 +563,7 @@ class Phenaki(nn.Module):
         self,
         videos = None,
         *,
-        texts: Optional[List[str]] = None,
+        texts: List[str] | None = None,
         video_codebook_ids = None,
         video_frame_mask = None,
         text_embeds = None,

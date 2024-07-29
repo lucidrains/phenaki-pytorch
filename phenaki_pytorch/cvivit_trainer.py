@@ -7,6 +7,7 @@ from beartype import beartype
 
 import torch
 from torch import nn
+from torch.nn import Module
 from torch.utils.data import Dataset, DataLoader, random_split
 
 import torchvision.transforms as T
@@ -53,7 +54,7 @@ def accum_log(log, new_logs):
 # main trainer class
 
 @beartype
-class CViViTTrainer(nn.Module):
+class CViViTTrainer(Module):
     def __init__(
         self,
         vae: CViViT,

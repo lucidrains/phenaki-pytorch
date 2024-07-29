@@ -6,6 +6,7 @@ from functools import wraps
 import torch
 import torch.nn.functional as F
 from torch import nn, einsum
+from torch.nn import Module, ModuleList
 from torch.autograd import grad as torch_grad
 
 import torchvision
@@ -103,7 +104,7 @@ def grad_layer_wrt_loss(loss, layer):
 
 # discriminator
 
-class DiscriminatorBlock(nn.Module):
+class DiscriminatorBlock(Module):
     def __init__(
         self,
         input_channels,
@@ -136,7 +137,7 @@ class DiscriminatorBlock(nn.Module):
         return x
 
 
-class Discriminator(nn.Module):
+class Discriminator(Module):
     def __init__(
         self,
         *,
@@ -179,8 +180,8 @@ class Discriminator(nn.Module):
 
             image_resolution //= 2
 
-        self.blocks = nn.ModuleList(blocks)
-        self.attn_blocks = nn.ModuleList(attn_blocks)
+        self.blocks = ModuleList(blocks)
+        self.attn_blocks = ModuleList(attn_blocks)
 
         dim_last = layer_dims[-1]
 
@@ -222,7 +223,7 @@ def pick_video_frame(video, frame_indices):
     images = rearrange(images, 'b 1 c ... -> b c ...')
     return images
 
-class CViViT(nn.Module):
+class CViViT(Module):
     def __init__(
         self,
         *,
